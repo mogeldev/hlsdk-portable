@@ -618,8 +618,11 @@ void HUD_InitClientWeapons( void )
 	// Allocate a slot for the local player
 	HUD_PrepEntity( &player, NULL );
 
-	// Allocate slot(s) for each weapon that we are going to be predicting
-	HUD_PrepEntity( &g_Glock, &player );
+	// Allocate slot(s) for each weapon that we are going to be predicting.
+	// Only the Nightfire weapons: they use the retail ids, which overlap the
+	// Half-Life ones, and a Half-Life weapon prepared after them took over
+	// their g_pWpns slot (Gauss = 9 = minigun, ...), so their prediction
+	// never got the weapon state and the client fire events did not run
 	HUD_PrepEntity( &g_PP9, &player );
 	HUD_PrepEntity( &g_nfMP9, &player );
 	HUD_PrepEntity( &g_nfMP9Silenced, &player );
@@ -631,19 +634,6 @@ void HUD_InitClientWeapons( void )
 	HUD_PrepEntity( &g_nfL96, &player );
 	HUD_PrepEntity( &g_nfL96Winter, &player );
 	HUD_PrepEntity( &g_nfMinigun, &player );
-	HUD_PrepEntity( &g_Crowbar, &player );
-	HUD_PrepEntity( &g_Python, &player );
-	HUD_PrepEntity( &g_Mp5, &player );
-	HUD_PrepEntity( &g_Crossbow, &player );
-	HUD_PrepEntity( &g_Shotgun, &player );
-	HUD_PrepEntity( &g_Rpg, &player );
-	HUD_PrepEntity( &g_Gauss, &player );
-	HUD_PrepEntity( &g_Egon, &player );
-	HUD_PrepEntity( &g_HGun, &player );
-	HUD_PrepEntity( &g_HandGren, &player );
-	HUD_PrepEntity( &g_Satchel, &player );
-	HUD_PrepEntity( &g_Tripmine, &player );
-	HUD_PrepEntity( &g_Snark, &player );
 }
 
 /*

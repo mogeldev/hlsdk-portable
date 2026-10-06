@@ -49,6 +49,8 @@ typedef struct nf_gun_info_s
 	int seq_fire2;		// secondary fire (Frinesi shoot_big), -1 = none
 	int pellets2;
 	float spread2;
+	float fire_anim_time;	// > 0: the fire sequence is not restarted by shots within
+				// this time (minigun: the barrels keep turning), the event plays the sound
 } nf_gun_info_t;
 
 extern const nf_gun_info_t g_nfGunMP9;

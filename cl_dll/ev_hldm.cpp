@@ -609,15 +609,26 @@ void EV_FireNFGun( event_args_t *args )
 	int pellets = big ? g->pellets2 : ( g->pellets > 0 ? g->pellets : 1 );
 	float range = g->range > 0.0f ? g->range : 8192.0f;
 
+	int play_sound = !EV_IsLocal( idx ) || g->local_sound;
+
 	if( EV_IsLocal( idx ))
 	{
 		// the view model's own events play the sound and the muzzle flash
+		static float s_flFireAnimTime;
+		float now = gEngfuncs.GetClientTime();
+
 		EV_MuzzleFlash();
-		gEngfuncs.pEventAPI->EV_WeaponAnimation( seq, args->iparam2 >> 8 );
+		if( g->fire_anim_time <= 0.0f || now < s_flFireAnimTime || now - s_flFireAnimTime >= g->fire_anim_time - 0.01f )
+		{
+			gEngfuncs.pEventAPI->EV_WeaponAnimation( seq, args->iparam2 >> 8 );
+			s_flFireAnimTime = now;
+		}
+		else
+			play_sound = TRUE;	// the sequence keeps running, its sound event does not come
 		V_PunchAxis( 0, gEngfuncs.pfnRandomFloat( -g->punch, -g->punch * 0.5f ));
 	}
 
-	if( !EV_IsLocal( idx ) || g->local_sound )
+	if( play_sound )
 	{
 		gEngfuncs.pEventAPI->EV_PlaySound( idx, origin, CHAN_WEAPON, g->fire_sound,
 			gEngfuncs.pfnRandomFloat( 0.92, 1.0 ), g->quiet ? ATTN_STATIC : ATTN_NORM, 0, 94 + gEngfuncs.pfnRandomLong( 0, 0xf ));

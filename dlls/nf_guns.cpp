@@ -189,7 +189,10 @@ const nf_gun_info_t g_nfGunL96Winter =
 // minigun: retail id 9, ammo "minigun" 200, clip 100, cycle 0.075, spread
 // 0.04, damage sk_plr_minigun_bullet; spin-up 0.66 s, spin-down 1.13 s;
 // reload 4.73 s; idle delay 8-16 s. The laser sight (events/minigunlaser.sc)
-// is not done yet [open]
+// is not done yet [open]. Retail restarts the 0.2 s "fire" sequence with
+// every shot (client.dll EV_Minigun, 0x4102c5f0), which in Xash3D freezes the
+// barrels on its first frames; here it runs through and the event plays the
+// shot sound in between (fire_anim_time)
 const nf_gun_info_t g_nfGunMinigun =
 {
 	NF_WEAPON_MINIGUN, "weapon_minigun",
@@ -201,7 +204,8 @@ const nf_gun_info_t g_nfGunMinigun =
 	{ 0, 1, -1, -1 }, { 8.0f, 8.0f, 0.0f, 0.0f },
 	3, 6, 7, 5, 5, 4.73f, 4.73f,
 	-1, -1, 0.0f, FALSE,
-	-1, 8.0f, FALSE, 0, FALSE, 0, 0.0f, BULLET_PLAYER_MP5, -1, 0, 0.0f
+	-1, 8.0f, FALSE, 0, FALSE, 0, 0.0f, BULLET_PLAYER_MP5, -1, 0, 0.0f,
+	6.0f / 30.0f
 };
 
 const nf_gun_info_t *NF_GunInfo( int id )
