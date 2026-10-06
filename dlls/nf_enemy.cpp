@@ -316,7 +316,7 @@ void CNightfireEnemy::Spawn( void )
 	m_iSentence = -1;
 	m_afCapability = bits_CAP_SQUAD | bits_CAP_TURN_HEAD | bits_CAP_DOORS_GROUP;
 	m_fEnemyEluded = FALSE;
-	m_fFirstEncounter = FALSE;	// no hand-signal schedule (SignalSuppress) on the first encounter
+	m_fFirstEncounter = TRUE;	// squad leader signals (SignalSuppress) on the first encounter
 	m_HackedGunPos = Vector( 0, 0, 55 );
 	if( m_voicePitch < 50 || m_voicePitch > 200 )
 		m_voicePitch = PITCH_NORM;
@@ -391,7 +391,8 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 	case ACT_SIGNAL3:
 	case ACT_VICTORY_DANCE:
 	case ACT_SPECIAL_ATTACK1:
-		// no hand signals; a 2-frame combat pose keeps the schedule short
+		// no hand-signal sequences in the models; a 2-frame combat pose
+		// keeps the signal schedules (first encounter, found enemy) short
 		iSequence = LookupSequence( "combatidle" );
 		break;
 	case ACT_SMALL_FLINCH:
