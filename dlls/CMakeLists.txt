@@ -106,6 +106,7 @@ set (SVDLL_SOURCES
 	mortar.cpp
 	mp5.cpp
 	multiplay_gamerules.cpp
+	nf_enemy.cpp
 	nf_items.cpp
 	nihilanth.cpp
 	nodes.cpp
