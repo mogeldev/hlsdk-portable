@@ -95,6 +95,12 @@ void CHud::Think( void )
 // returns 1 if they've changed, 0 otherwise
 int CHud::Redraw( float flTime, int intermission )
 {
+	// Nightfire ships no Half-Life HUD sprites; skip drawing if the HUD never
+	// initialized (m_HUD_number_0 stays -1) to avoid drawing uninitialised
+	// element sprites.
+	if( m_HUD_number_0 == -1 )
+		return 0;
+
 	m_fOldTime = m_flTime;	// save time of previous redraw
 	m_flTime = flTime;
 	m_flTimeDelta = (double)( m_flTime - m_fOldTime );

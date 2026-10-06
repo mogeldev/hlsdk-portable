@@ -553,13 +553,9 @@ void CHud::VidInit( void )
 
 	if( m_HUD_number_0 == -1 )
 	{
-		const char *msg = "There is something wrong with your game data! Please, reinstall\n";
-
-		if( HUD_MessageBox( msg ) )
-		{
-			gEngfuncs.pfnClientCmd( "quit\n" );
-		}
-
+		// Nightfire ships no Half-Life HUD sprite set (sprites/hud.txt). Skip
+		// HUD font init but keep the client alive so the world still renders.
+		gEngfuncs.Con_Printf( "HUD: number_0 sprite not found, HUD disabled\n" );
 		return;
 	}
 
