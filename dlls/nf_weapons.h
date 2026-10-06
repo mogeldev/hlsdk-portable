@@ -14,10 +14,16 @@ repo (mogeldev/nightfire-xash3d).
 // The retail weapon ids (m_iId in each Spawn / GetItemInfo). They overlap the
 // Half-Life ids, so W_Precache no longer registers the Half-Life weapons.
 #define NF_WEAPON_PP9		2
+#define NF_WEAPON_KOWLOON	3
+#define NF_WEAPON_RAPTOR	4
 #define NF_WEAPON_MP9		5
 #define NF_WEAPON_MP9_SILENCED	6
 #define NF_WEAPON_COMMANDO	7	// SIG552
 #define NF_WEAPON_PDW90		8	// P90
+#define NF_WEAPON_MINIGUN	9
+#define NF_WEAPON_FRINESI	10
+#define NF_WEAPON_L96A1		12
+#define NF_WEAPON_L96A1_WINTER	13
 #define WEAPON_NF_PP9		NF_WEAPON_PP9
 
 #define NF_PP9_MAX_CLIP		16	// retail GetItemInfo
@@ -88,6 +94,9 @@ public:
 	}
 
 protected:
+	// one shot: clip, volume, bullets (pellets), fire event with the sequence
+	void FireRound( int pellets, float spread, int seq );
+
 	// m_fireState (synced as iuser3): fire mode of weapons that have one
 	// (SIG552: 0 = 3-round burst, 1 = automatic); m_fInAttack (iuser2):
 	// rounds fired since the trigger was pressed (burst / semi-automatic)
@@ -107,5 +116,63 @@ NF_DECLARE_GUN( CNightfireMP9, g_nfGunMP9 )
 NF_DECLARE_GUN( CNightfireMP9Silenced, g_nfGunMP9Silenced )
 NF_DECLARE_GUN( CNightfireCommando, g_nfGunCommando )
 NF_DECLARE_GUN( CNightfirePDW90, g_nfGunPDW90 )
+NF_DECLARE_GUN( CNightfireKowloon, g_nfGunKowloon )
+NF_DECLARE_GUN( CNightfireRaptor, g_nfGunRaptor )
+
+// Frinesi: Half-Life shotgun style shell-by-shell reload; secondary = big shot
+class CNightfireFrinesi : public CNightfireGun
+{
+public:
+	const nf_gun_info_t *Info( void ) { return &g_nfGunFrinesi; }
+	void PrimaryAttack( void ) { Fire( FALSE ); }
+	void SecondaryAttack( void ) { Fire( TRUE ); }
+	void Reload( void );
+	void WeaponIdle( void );
+
+private:
+	void Fire( BOOL big );
+};
+
+// L96A1 sniper rifle: the secondary attack steps the zoom (m_fireState:
+// 0 off, 1 = FOV 40, 2 = FOV 10); a reload drops the zoom until it is done
+class CNightfireSniper : public CNightfireGun
+{
+public:
+	void SecondaryAttack( void );
+	void Holster( int skiplocal = 0 );
+	void Reload( void );
+	void ItemPostFrame( void );
+
+private:
+	int ZoomFOV( void ) { return m_fireState == 1 ? 40 : m_fireState == 2 ? 10 : 0; }
+	void SetFOV( int fov );
+};
+
+class CNightfireL96 : public CNightfireSniper
+{
+public:
+	const nf_gun_info_t *Info( void ) { return &g_nfGunL96; }
+};
+
+class CNightfireL96Winter : public CNightfireSniper
+{
+public:
+	const nf_gun_info_t *Info( void ) { return &g_nfGunL96Winter; }
+};
+
+// minigun: spins up before it fires and down after the trigger is released;
+// m_fInAttack (iuser2) holds the spin state, pev->fuser1 (counted down like
+// the attack times) the time left in spin-up / spin-down
+class CNightfireMinigun : public CNightfireGun
+{
+public:
+	const nf_gun_info_t *Info( void ) { return &g_nfGunMinigun; }
+	BOOL Deploy( void );
+	void Holster( int skiplocal = 0 );
+	void PrimaryAttack( void );
+	void SecondaryAttack( void ) { m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.5f; }
+	void Reload( void );
+	void WeaponIdle( void );
+};
 
 #endif // NF_WEAPONS_H

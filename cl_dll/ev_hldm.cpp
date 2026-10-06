@@ -604,14 +604,20 @@ void EV_FireNFGun( event_args_t *args )
 
 	int shell = gEngfuncs.pEventAPI->EV_FindModelIndex( "models/shell.mdl" );
 
+	int seq = args->iparam2 & 0xFF;
+	int big = g->seq_fire2 >= 0 && seq == g->seq_fire2;
+	int pellets = big ? g->pellets2 : ( g->pellets > 0 ? g->pellets : 1 );
+	float range = g->range > 0.0f ? g->range : 8192.0f;
+
 	if( EV_IsLocal( idx ))
 	{
 		// the view model's own events play the sound and the muzzle flash
 		EV_MuzzleFlash();
-		gEngfuncs.pEventAPI->EV_WeaponAnimation( args->iparam2 & 0xFF, args->iparam2 >> 8 );
+		gEngfuncs.pEventAPI->EV_WeaponAnimation( seq, args->iparam2 >> 8 );
 		V_PunchAxis( 0, gEngfuncs.pfnRandomFloat( -g->punch, -g->punch * 0.5f ));
 	}
-	else
+
+	if( !EV_IsLocal( idx ) || g->local_sound )
 	{
 		gEngfuncs.pEventAPI->EV_PlaySound( idx, origin, CHAN_WEAPON, g->fire_sound,
 			gEngfuncs.pfnRandomFloat( 0.92, 1.0 ), g->quiet ? ATTN_STATIC : ATTN_NORM, 0, 94 + gEngfuncs.pfnRandomLong( 0, 0xf ));
@@ -622,7 +628,13 @@ void EV_FireNFGun( event_args_t *args )
 
 	EV_GetGunPosition( args, vecSrc, origin );
 	VectorCopy( forward, vecAiming );
-	EV_HLDM_FireBullets( idx, forward, right, up, 1, vecSrc, vecAiming, 8192, BULLET_PLAYER_MP5, 2, &g_tracerCount[idx - 1], args->fparam1, args->fparam2 );
+	if( pellets > 1 )
+	{
+		float spread = big ? g->spread2 : g->spread;
+		EV_HLDM_FireBullets( idx, forward, right, up, pellets, vecSrc, vecAiming, range, g->bullet, 0, &g_tracerCount[idx - 1], spread, spread );
+	}
+	else
+		EV_HLDM_FireBullets( idx, forward, right, up, 1, vecSrc, vecAiming, range, g->bullet, 2, &g_tracerCount[idx - 1], args->fparam1, args->fparam2 );
 }
 //======================
 //	    NIGHTFIRE GUNS END

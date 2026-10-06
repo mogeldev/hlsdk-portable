@@ -85,6 +85,8 @@ static const char *const g_nfSkillCvars[] =
 	"sk_raptor_bullet", "sk_minigun_bullet", "sk_alerted_bullet", "sk_laser_bolt",
 	// player weapons (dlls/nf_pp9.cpp, dlls/nf_guns.cpp)
 	"sk_plr_pp9_bullet", "sk_plr_mp9_bullet", "sk_plr_commando_bullet", "sk_plr_pdw90_bullet",
+	"sk_plr_kowloon_bullet", "sk_plr_raptor_bullet", "sk_plr_sniper_bullet",	// sk_plr_buckshot: Half-Life registers it
+	"sk_plr_minigun_bullet",
 };
 
 static cvar_t g_nfSkill[ARRAYSIZE( g_nfSkillCvars ) * 3];
@@ -294,6 +296,11 @@ static const char *NF_EnemyWeaponPickup( int id )
 	switch( id )
 	{
 	case 1: return "weapon_commando";	// SIG552
+	case 2: return "weapon_frinesi";
+	case 5: return "weapon_l96a1";
+	case 6: return "weapon_l96a1";		// [assumed] not the winter version
+	case 9: return "weapon_raptor";
+	case 11: return "weapon_minigun";
 	case 3: return "weapon_mp9";
 	case 4: return "weapon_mp9_silenced";
 	case 7: return "weapon_pp9";

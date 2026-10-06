@@ -61,6 +61,12 @@ CNightfireMP9 g_nfMP9;
 CNightfireMP9Silenced g_nfMP9Silenced;
 CNightfireCommando g_nfCommando;
 CNightfirePDW90 g_nfPDW90;
+CNightfireKowloon g_nfKowloon;
+CNightfireRaptor g_nfRaptor;
+CNightfireFrinesi g_nfFrinesi;
+CNightfireL96 g_nfL96;
+CNightfireL96Winter g_nfL96Winter;
+CNightfireMinigun g_nfMinigun;
 CCrowbar g_Crowbar;
 CPython g_Python;
 CMP5 g_Mp5;
@@ -619,6 +625,12 @@ void HUD_InitClientWeapons( void )
 	HUD_PrepEntity( &g_nfMP9Silenced, &player );
 	HUD_PrepEntity( &g_nfCommando, &player );
 	HUD_PrepEntity( &g_nfPDW90, &player );
+	HUD_PrepEntity( &g_nfKowloon, &player );
+	HUD_PrepEntity( &g_nfRaptor, &player );
+	HUD_PrepEntity( &g_nfFrinesi, &player );
+	HUD_PrepEntity( &g_nfL96, &player );
+	HUD_PrepEntity( &g_nfL96Winter, &player );
+	HUD_PrepEntity( &g_nfMinigun, &player );
 	HUD_PrepEntity( &g_Crowbar, &player );
 	HUD_PrepEntity( &g_Python, &player );
 	HUD_PrepEntity( &g_Mp5, &player );
@@ -711,6 +723,24 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 			break;
 		case NF_WEAPON_PDW90:
 			pWeapon = &g_nfPDW90;
+			break;
+		case NF_WEAPON_KOWLOON:
+			pWeapon = &g_nfKowloon;
+			break;
+		case NF_WEAPON_RAPTOR:
+			pWeapon = &g_nfRaptor;
+			break;
+		case NF_WEAPON_FRINESI:
+			pWeapon = &g_nfFrinesi;
+			break;
+		case NF_WEAPON_L96A1:
+			pWeapon = &g_nfL96;
+			break;
+		case NF_WEAPON_L96A1_WINTER:
+			pWeapon = &g_nfL96Winter;
+			break;
+		case NF_WEAPON_MINIGUN:
+			pWeapon = &g_nfMinigun;
 			break;
 	}
 

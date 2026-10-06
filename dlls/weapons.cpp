@@ -314,6 +314,17 @@ void W_Precache( void )
 	UTIL_PrecacheOther( "ammo_commando" );
 	UTIL_PrecacheOtherWeapon( "weapon_pdw90" );
 	UTIL_PrecacheOther( "ammo_pdw90" );
+	UTIL_PrecacheOtherWeapon( "weapon_kowloon" );
+	UTIL_PrecacheOther( "ammo_kowloon" );
+	UTIL_PrecacheOtherWeapon( "weapon_raptor" );
+	UTIL_PrecacheOther( "ammo_raptor" );
+	UTIL_PrecacheOtherWeapon( "weapon_frinesi" );
+	UTIL_PrecacheOther( "ammo_shotgun" );
+	UTIL_PrecacheOtherWeapon( "weapon_l96a1" );
+	UTIL_PrecacheOtherWeapon( "weapon_l96a1_winter" );
+	UTIL_PrecacheOther( "ammo_sniper" );
+	UTIL_PrecacheOtherWeapon( "weapon_minigun" );
+	UTIL_PrecacheOther( "ammo_mini" );
 
 	if( g_pGameRules->IsDeathmatch() )
 	{
