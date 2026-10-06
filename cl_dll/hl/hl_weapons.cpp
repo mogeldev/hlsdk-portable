@@ -55,7 +55,12 @@ vec3_t previousorigin;
 
 // HLDM Weapon placeholder entities.
 CGlock g_Glock;
-CNightfirePP9 g_PP9;	// James Bond 007: Nightfire
+// James Bond 007: Nightfire
+CNightfirePP9 g_PP9;
+CNightfireMP9 g_nfMP9;
+CNightfireMP9Silenced g_nfMP9Silenced;
+CNightfireCommando g_nfCommando;
+CNightfirePDW90 g_nfPDW90;
 CCrowbar g_Crowbar;
 CPython g_Python;
 CMP5 g_Mp5;
@@ -610,6 +615,10 @@ void HUD_InitClientWeapons( void )
 	// Allocate slot(s) for each weapon that we are going to be predicting
 	HUD_PrepEntity( &g_Glock, &player );
 	HUD_PrepEntity( &g_PP9, &player );
+	HUD_PrepEntity( &g_nfMP9, &player );
+	HUD_PrepEntity( &g_nfMP9Silenced, &player );
+	HUD_PrepEntity( &g_nfCommando, &player );
+	HUD_PrepEntity( &g_nfPDW90, &player );
 	HUD_PrepEntity( &g_Crowbar, &player );
 	HUD_PrepEntity( &g_Python, &player );
 	HUD_PrepEntity( &g_Mp5, &player );
@@ -684,52 +693,24 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 
 	// Fill in data based on selected weapon
 	// FIXME, make this a method in each weapon?  where you pass in an entity_state_t *?
+	// James Bond 007: Nightfire weapons use the retail ids, which overlap
+	// the Half-Life ones; the Half-Life weapons are not registered any more
 	switch( from->client.m_iId )
 	{
-		case WEAPON_CROWBAR:
-			pWeapon = &g_Crowbar;
-			break;
-		case WEAPON_NF_PP9:
+		case NF_WEAPON_PP9:
 			pWeapon = &g_PP9;
 			break;
-		case WEAPON_GLOCK:
-			pWeapon = &g_Glock;
+		case NF_WEAPON_MP9:
+			pWeapon = &g_nfMP9;
 			break;
-		case WEAPON_PYTHON:
-			pWeapon = &g_Python;
+		case NF_WEAPON_MP9_SILENCED:
+			pWeapon = &g_nfMP9Silenced;
 			break;
-		case WEAPON_MP5:
-			pWeapon = &g_Mp5;
+		case NF_WEAPON_COMMANDO:
+			pWeapon = &g_nfCommando;
 			break;
-		case WEAPON_CROSSBOW:
-			pWeapon = &g_Crossbow;
-			break;
-		case WEAPON_SHOTGUN:
-			pWeapon = &g_Shotgun;
-			break;
-		case WEAPON_RPG:
-			pWeapon = &g_Rpg;
-			break;
-		case WEAPON_GAUSS:
-			pWeapon = &g_Gauss;
-			break;
-		case WEAPON_EGON:
-			pWeapon = &g_Egon;
-			break;
-		case WEAPON_HORNETGUN:
-			pWeapon = &g_HGun;
-			break;
-		case WEAPON_HANDGRENADE:
-			pWeapon = &g_HandGren;
-			break;
-		case WEAPON_SATCHEL:
-			pWeapon = &g_Satchel;
-			break;
-		case WEAPON_TRIPMINE:
-			pWeapon = &g_Tripmine;
-			break;
-		case WEAPON_SNARK:
-			pWeapon = &g_Snark;
+		case NF_WEAPON_PDW90:
+			pWeapon = &g_nfPDW90;
 			break;
 	}
 

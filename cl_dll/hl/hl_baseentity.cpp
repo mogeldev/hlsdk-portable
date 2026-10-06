@@ -229,6 +229,7 @@ void CBaseMonster::RadiusDamage( entvars_t *pevInflictor, entvars_t *pevAttacker
 void CBaseMonster::RadiusDamage( Vector vecSrc, entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int iClassIgnore, int bitsDamageType ) { }
 void CBaseMonster::FadeMonster( void ) { }
 void CBaseMonster::GibMonster( void ) { }
+BOOL CBaseMonster::ShouldGibMonster( int iGib ) { return FALSE; }
 BOOL CBaseMonster::HasHumanGibs( void ) { return FALSE; }
 BOOL CBaseMonster::HasAlienGibs( void ) { return FALSE; }
 Activity CBaseMonster::GetDeathActivity( void ) { return ACT_DIE_HEADSHOT; }

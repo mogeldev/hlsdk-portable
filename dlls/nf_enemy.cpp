@@ -83,7 +83,8 @@ static const char *const g_nfSkillCvars[] =
 	"sk_enemy_rocket", "sk_commando_bullet", "sk_mp9_bullet", "sk_pdw90_bullet",
 	"sk_kowloon_bullet", "sk_buckshot_bullet", "sk_sniper_bullet",
 	"sk_raptor_bullet", "sk_minigun_bullet", "sk_alerted_bullet", "sk_laser_bolt",
-	"sk_plr_pp9_bullet",	// player weapons, dlls/nf_pp9.cpp ...
+	// player weapons (dlls/nf_pp9.cpp, dlls/nf_guns.cpp)
+	"sk_plr_pp9_bullet", "sk_plr_mp9_bullet", "sk_plr_commando_bullet", "sk_plr_pdw90_bullet",
 };
 
 static cvar_t g_nfSkill[ARRAYSIZE( g_nfSkillCvars ) * 3];
@@ -129,8 +130,8 @@ static const nf_enemy_weapon_t g_nfEnemyWeapons[] =
 	{ NULL },											// 0 none
 	{ "weapons/sig552_fire%d.wav", 3, "weapons/sig552_reload_empty.wav", "sk_commando_bullet", 30 },	// 1 SIG552
 	{ "weapons/frinesi_fire%d.wav", 1, "weapons/frinesi_reload1.wav", "sk_buckshot_bullet", 8, TRUE },	// 2 Frinesi
-	{ "weapons/mp9_fire%d.wav", 3, "weapons/mp9_reload_empty.wav", "sk_mp9_bullet", 30 },		// 3 MP9
-	{ "weapons/mp9_fire_sil%d.wav", 2, "weapons/mp9_reload_empty.wav", "sk_mp9_bullet", 30 },		// 4 MP9 silenced
+	{ "weapons/mp9_fire%d.wav", 3, "weapons/mp9_reload_empty.wav", "sk_mp9_bullet", 32 },		// 3 MP9
+	{ "weapons/mp9_fire_sil%d.wav", 2, "weapons/mp9_reload_empty.wav", "sk_mp9_bullet", 32 },		// 4 MP9 silenced
 	{ "weapons/l96_fire%d.wav", 2, "weapons/l96_reload_empty.wav", "sk_sniper_bullet", 5, FALSE, TRUE },	// 5 L96
 	{ "weapons/l96_fire%d.wav", 2, "weapons/l96_reload_empty.wav", "sk_sniper_bullet", 5, FALSE, TRUE },	// 6 L96
 	{ "weapons/pp9_fire%d.wav", 2, "weapons/pp9_reload_empty.wav", "sk_kowloon_bullet", 16 },		// 7 PP9
@@ -155,6 +156,9 @@ public:
 	void PainSound( void );
 	void DeathSound( void );
 	void GibMonster( void );
+	BOOL ShouldGibMonster( int iGib ) { return FALSE; }	// Nightfire has no gib models
+	Activity GetDeathActivity( void );
+	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
 	void Killed( entvars_t *pevAttacker, int iGib );
 	BOOL FOkToSpeak( void ) { return FALSE; }	// no HG_* sentence groups in Nightfire
@@ -195,6 +199,7 @@ private:
 	int m_iPatrolIdx;
 	int m_iPatrolTarget;
 	float m_flNextPatrolTime;
+	int m_bitsLastDamage;	// damage type of the latest hit (death animation)
 };
 
 TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
@@ -214,6 +219,7 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_iPatrolIdx, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_iPatrolTarget, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_flNextPatrolTime, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireEnemy, m_bitsLastDamage, FIELD_INTEGER ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -279,6 +285,21 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	}
 	else
 		CHGrunt::KeyValue( pkvd );
+}
+
+// weapon pickup dropped for a primary_weapon id; NULL while the player
+// weapon does not exist yet
+static const char *NF_EnemyWeaponPickup( int id )
+{
+	switch( id )
+	{
+	case 1: return "weapon_commando";	// SIG552
+	case 3: return "weapon_mp9";
+	case 4: return "weapon_mp9_silenced";
+	case 7: return "weapon_pp9";
+	case 8: return "weapon_pdw90";		// P90
+	default: return NULL;
+	}
 }
 
 const nf_enemy_weapon_t *CNightfireEnemy::Weapon( void )
@@ -351,7 +372,13 @@ void CNightfireEnemy::Precache( void )
 
 	m_iBrassShell = PRECACHE_MODEL( "models/shell.mdl" );
 	if( m_cGrenades > 0 )
+	{
 		PRECACHE_MODEL( "models/w_frag_grenade.mdl" );
+		// CGrenade::ShootTimed sets the HL model before we replace it; W_Precache
+		// no longer precaches it (HL hand grenade unregistered). The file does
+		// not exist in Nightfire, but a late precache would warn every throw.
+		PRECACHE_MODEL( "models/w_grenade.mdl" );
+	}
 }
 
 void CNightfireEnemy::Spawn( void )
@@ -472,6 +499,25 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 		// no hand-signal sequences in the models; a 2-frame combat pose
 		// keeps the signal schedules (first encounter, found enemy) short
 		iSequence = LookupSequence( "combatidle" );
+		break;
+	case ACT_DIEVIOLENT:
+		// explosions throw the enemy: die_explosion1-6 (activity 39 also
+		// holds die_shotgun1/2 and die_falling_loop)
+		iSequence = ACTIVITY_NOT_AVAILABLE;
+		if( m_bitsLastDamage & DMG_BLAST )
+		{
+			int seqs[6], n = 0;
+			for( int i = 1; i <= 6; i++ )
+			{
+				int s = LookupSequence( UTIL_VarArgs( "die_explosion%d", i ));
+				if( s > ACTIVITY_NOT_AVAILABLE )
+					seqs[n++] = s;
+			}
+			if( n )
+				iSequence = seqs[RANDOM_LONG( 0, n - 1 )];
+		}
+		if( iSequence <= ACTIVITY_NOT_AVAILABLE )
+			iSequence = LookupActivity( NewActivity );
 		break;
 	case ACT_SMALL_FLINCH:
 	case ACT_BIG_FLINCH:	// 27 is the electrocution loop in Nightfire
@@ -597,9 +643,23 @@ void CNightfireEnemy::HandleAnimEvent( MonsterEvent_t *pEvent )
 		break;
 	}
 	case HGRUNT_AE_DROP_GUN:
+	{
+		// the dying enemy drops his weapon as a pickup (event 11 at the
+		// start of the death sequences) and the gun leaves his hand
+		const char *pickup = NF_EnemyWeaponPickup( m_iWeapon );
+		int group = FindBodygroup( "weapons" );
+		if( pickup && group >= 0 && GetBodygroup( group ) != 0 )
+		{
+			Vector vecGunPos, vecGunAngles;
+			GetAttachment( 0, vecGunPos, vecGunAngles );
+			SetBodygroup( group, 0 );
+			DropItem( pickup, vecGunPos, vecGunAngles );
+		}
+		break;
+	}
 	case 13:	// throw a grenade back
 	case 14:	// kick a grenade away
-		// [not yet] Nightfire weapon pickups and grenade return do not exist yet
+		// [not yet] grenade throw-back / kick
 		break;
 	default:
 		CSquadMonster::HandleAnimEvent( pEvent );
@@ -630,6 +690,28 @@ void CNightfireEnemy::PainSound( void )
 void CNightfireEnemy::DeathSound( void )
 {
 	PlayVoice( "die", m_cDie, ATTN_IDLE );
+}
+
+int CNightfireEnemy::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
+{
+	// m_bitsDamageType accumulates over the enemy's life; the death
+	// animation depends on the hit that kills
+	m_bitsLastDamage = bitsDamageType;
+	return CHGrunt::TakeDamage( pevInflictor, pevAttacker, flDamage, bitsDamageType );
+}
+
+Activity CNightfireEnemy::GetDeathActivity( void )
+{
+	if( pev->deadflag != DEAD_NO )
+		return m_IdealActivity;
+
+	// In the retail game explosions throw enemies away with a death
+	// animation (user, retail playthrough); the HL death activity choice
+	// never uses ACT_DIEVIOLENT.
+	if(( m_bitsLastDamage & DMG_BLAST ) && LookupActivity( ACT_DIEVIOLENT ) > ACTIVITY_NOT_AVAILABLE )
+		return ACT_DIEVIOLENT;
+
+	return CHGrunt::GetDeathActivity();
 }
 
 void CNightfireEnemy::GibMonster( void )

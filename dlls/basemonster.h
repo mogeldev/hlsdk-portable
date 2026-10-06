@@ -295,7 +295,7 @@ public:
 	Activity GetSmallFlinchActivity( void );
 	virtual void Killed( entvars_t *pevAttacker, int iGib );
 	virtual void GibMonster( void );
-	BOOL ShouldGibMonster( int iGib );
+	virtual BOOL ShouldGibMonster( int iGib );	// virtual: Nightfire enemies never gib
 	void CallGibMonster( void );
 	virtual BOOL HasHumanGibs( void );
 	virtual BOOL HasAlienGibs( void );

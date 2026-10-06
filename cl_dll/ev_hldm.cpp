@@ -35,6 +35,7 @@
 
 #include "r_studioint.h"
 #include "com_model.h"
+#include "nf_gun_info.h"	// James Bond 007: Nightfire
 
 extern engine_studio_api_t IEngineStudio;
 
@@ -53,6 +54,7 @@ extern "C"
 void EV_FireGlock1( struct event_args_s *args );
 void EV_FireGlock2( struct event_args_s *args );
 void EV_FirePP9( struct event_args_s *args );
+void EV_FireNFGun( struct event_args_s *args );
 void EV_FireShotGunSingle( struct event_args_s *args );
 void EV_FireShotGunDouble( struct event_args_s *args );
 void EV_FireMP5( struct event_args_s *args );
@@ -577,6 +579,53 @@ void EV_FirePP9( event_args_t *args )
 }
 //======================
 //	    PP9 END
+//======================
+
+//======================
+//	    NIGHTFIRE GUNS (dlls/nf_guns.cpp: MP9, SIG552, P90, ...)
+//======================
+// iparam1 weapon id, iparam2 fire sequence | body << 8, fparam1/2 spread
+void EV_FireNFGun( event_args_t *args )
+{
+	const nf_gun_info_t *g = NF_GunInfo( args->iparam1 );
+	if( !g )
+		return;
+
+	int idx = args->entindex;
+	vec3_t origin, angles, velocity;
+	vec3_t ShellVelocity, ShellOrigin;
+	vec3_t vecSrc, vecAiming;
+	vec3_t up, right, forward;
+
+	VectorCopy( args->origin, origin );
+	VectorCopy( args->angles, angles );
+	VectorCopy( args->velocity, velocity );
+	AngleVectors( angles, forward, right, up );
+
+	int shell = gEngfuncs.pEventAPI->EV_FindModelIndex( "models/shell.mdl" );
+
+	if( EV_IsLocal( idx ))
+	{
+		// the view model's own events play the sound and the muzzle flash
+		EV_MuzzleFlash();
+		gEngfuncs.pEventAPI->EV_WeaponAnimation( args->iparam2 & 0xFF, args->iparam2 >> 8 );
+		V_PunchAxis( 0, gEngfuncs.pfnRandomFloat( -g->punch, -g->punch * 0.5f ));
+	}
+	else
+	{
+		gEngfuncs.pEventAPI->EV_PlaySound( idx, origin, CHAN_WEAPON, g->fire_sound,
+			gEngfuncs.pfnRandomFloat( 0.92, 1.0 ), g->quiet ? ATTN_STATIC : ATTN_NORM, 0, 94 + gEngfuncs.pfnRandomLong( 0, 0xf ));
+	}
+
+	EV_GetDefaultShellInfo( args, origin, velocity, ShellVelocity, ShellOrigin, forward, right, up, 20, -12, 4 );
+	EV_EjectBrass( ShellOrigin, ShellVelocity, angles[YAW], shell, TE_BOUNCE_SHELL );
+
+	EV_GetGunPosition( args, vecSrc, origin );
+	VectorCopy( forward, vecAiming );
+	EV_HLDM_FireBullets( idx, forward, right, up, 1, vecSrc, vecAiming, 8192, BULLET_PLAYER_MP5, 2, &g_tracerCount[idx - 1], args->fparam1, args->fparam2 );
+}
+//======================
+//	    NIGHTFIRE GUNS END
 //======================
 
 //======================

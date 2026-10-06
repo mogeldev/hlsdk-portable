@@ -301,69 +301,25 @@ void W_Precache( void )
 	UTIL_PrecacheOther( "item_security" );
 	UTIL_PrecacheOther( "item_longjump" );
 
-	// shotgun
-	UTIL_PrecacheOtherWeapon( "weapon_shotgun" );
-	UTIL_PrecacheOther( "ammo_buckshot" );
-
-	// crowbar
-	UTIL_PrecacheOtherWeapon( "weapon_crowbar" );
-
-	// glock
-	UTIL_PrecacheOtherWeapon( "weapon_9mmhandgun" );
-	UTIL_PrecacheOther( "ammo_9mmclip" );
-
-	// James Bond 007: Nightfire (dlls/nf_*.cpp)
+	// James Bond 007: Nightfire weapons (dlls/nf_*.cpp) use the retail weapon
+	// ids, which overlap the Half-Life ones (PP9 = 2, MP9 = 5, SIG552 = 7, ...),
+	// so the Half-Life weapons are no longer registered here (their classes
+	// still exist; no Nightfire map places them).
 	UTIL_PrecacheOtherWeapon( "weapon_pp9" );
 	UTIL_PrecacheOther( "ammo_pp9" );
-
-	// mp5
-	UTIL_PrecacheOtherWeapon( "weapon_9mmAR" );
-	UTIL_PrecacheOther( "ammo_9mmAR" );
-	UTIL_PrecacheOther( "ammo_ARgrenades" );
-
-	// 9mm ammo box
-	UTIL_PrecacheOther( "ammo_9mmbox" );
-
-#if !OEM_BUILD && !HLDEMO_BUILD
-	// python
-	UTIL_PrecacheOtherWeapon( "weapon_357" );
-	UTIL_PrecacheOther( "ammo_357" );
-
-	// gauss
-	UTIL_PrecacheOtherWeapon( "weapon_gauss" );
-	UTIL_PrecacheOther( "ammo_gaussclip" );
-
-	// rpg
-	UTIL_PrecacheOtherWeapon( "weapon_rpg" );
-	UTIL_PrecacheOther( "ammo_rpgclip" );
-
-	// crossbow
-	UTIL_PrecacheOtherWeapon( "weapon_crossbow" );
-	UTIL_PrecacheOther( "ammo_crossbow" );
-
-	// egon
-	UTIL_PrecacheOtherWeapon( "weapon_egon" );
-#endif
-	// tripmine
-	UTIL_PrecacheOtherWeapon( "weapon_tripmine" );
-#if !OEM_BUILD && !HLDEMO_BUILD
-	// satchel charge
-	UTIL_PrecacheOtherWeapon( "weapon_satchel" );
-#endif
-	// hand grenade
-	UTIL_PrecacheOtherWeapon("weapon_handgrenade");
-#if !OEM_BUILD && !HLDEMO_BUILD
-	// squeak grenade
-	UTIL_PrecacheOtherWeapon( "weapon_snark" );
-
-	// hornetgun
-	UTIL_PrecacheOtherWeapon( "weapon_hornetgun" );
+	UTIL_PrecacheOtherWeapon( "weapon_mp9" );
+	UTIL_PrecacheOtherWeapon( "weapon_mp9_silenced" );
+	UTIL_PrecacheOther( "ammo_mp9" );
+	UTIL_PrecacheOtherWeapon( "weapon_commando" );
+	UTIL_PrecacheOther( "ammo_commando" );
+	UTIL_PrecacheOtherWeapon( "weapon_pdw90" );
+	UTIL_PrecacheOther( "ammo_pdw90" );
 
 	if( g_pGameRules->IsDeathmatch() )
 	{
 		UTIL_PrecacheOther( "weaponbox" );// container for dropped deathmatch weapons
 	}
-#endif
+
 	g_sModelIndexFireball = PRECACHE_MODEL( "sprites/zerogxplode.spr" );// fireball
 	g_sModelIndexWExplosion = PRECACHE_MODEL( "sprites/WXplo1.spr" );// underwater fireball
 	g_sModelIndexSmoke = PRECACHE_MODEL( "sprites/steam1.spr" );// smoke

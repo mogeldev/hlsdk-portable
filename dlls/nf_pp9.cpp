@@ -88,7 +88,7 @@ int CNightfirePP9::GetItemInfo( ItemInfo *p )
 	p->iMaxAmmo2 = -1;
 	p->iMaxClip = NF_PP9_MAX_CLIP;
 	p->iSlot = 1;
-	p->iPosition = 1;	// after the HL glock in the pistol slot
+	p->iPosition = 0;
 	p->iFlags = 0;
 	p->iId = m_iId = WEAPON_NF_PP9;
 	p->iWeight = 10;	// [assumed] HL glock weight

@@ -23,6 +23,7 @@ extern "C"
 void EV_FireGlock1( struct event_args_s *args  );
 void EV_FireGlock2( struct event_args_s *args  );
 void EV_FirePP9( struct event_args_s *args );
+void EV_FireNFGun( struct event_args_s *args );
 void EV_FireShotGunSingle( struct event_args_s *args  );
 void EV_FireShotGunDouble( struct event_args_s *args  );
 void EV_FireMP5( struct event_args_s *args  );
@@ -62,6 +63,7 @@ void Game_HookEvents( void )
 	gEngfuncs.pfnHookEvent( "events/glock1.sc", EV_FireGlock1 );
 	gEngfuncs.pfnHookEvent( "events/glock2.sc", EV_FireGlock2 );
 	gEngfuncs.pfnHookEvent( "events/pp9.sc", EV_FirePP9 );	// James Bond 007: Nightfire
+	gEngfuncs.pfnHookEvent( "events/nfgun.sc", EV_FireNFGun );
 	gEngfuncs.pfnHookEvent( "events/shotgun1.sc", EV_FireShotGunSingle );
 	gEngfuncs.pfnHookEvent( "events/shotgun2.sc", EV_FireShotGunDouble );
 	gEngfuncs.pfnHookEvent( "events/mp5.sc", EV_FireMP5 );
