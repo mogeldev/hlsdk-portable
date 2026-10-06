@@ -277,6 +277,9 @@ int CHudAmmo::Init( void )
 	HOOK_COMMAND( "cancelselect", Close );
 	HOOK_COMMAND( "invnext", NextWeapon );
 	HOOK_COMMAND( "invprev", PrevWeapon );
+	// James Bond 007: Nightfire's config.cfg binds the mouse wheel to these
+	HOOK_COMMAND( "Nextweapon", NextWeapon );
+	HOOK_COMMAND( "Prevweapon", PrevWeapon );
 
 	Reset();
 

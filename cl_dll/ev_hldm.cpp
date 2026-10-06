@@ -52,6 +52,7 @@ extern "C"
 // HLDM
 void EV_FireGlock1( struct event_args_s *args );
 void EV_FireGlock2( struct event_args_s *args );
+void EV_FirePP9( struct event_args_s *args );
 void EV_FireShotGunSingle( struct event_args_s *args );
 void EV_FireShotGunDouble( struct event_args_s *args );
 void EV_FireMP5( struct event_args_s *args );
@@ -518,6 +519,64 @@ void EV_FireGlock2( event_args_t *args )
 }
 //======================
 //	   GLOCK END
+//======================
+
+//======================
+//	    PP9 START (James Bond 007: Nightfire, dlls/nf_pp9.cpp)
+//======================
+// v_p99.mdl sequences (the Glock's order plus the silencer ones)
+enum nf_pp9_ev_e
+{
+	PP9_EV_SHOOT = 3,
+	PP9_EV_SHOOT_EMPTY = 4,
+	PP9_EV_SILENCER_SHOOT = 11,
+	PP9_EV_SILENCER_SHOOT_EMPTY = 12,
+};
+
+// fparam1/2 spread, iparam1 silenced, bparam1 clip now empty
+void EV_FirePP9( event_args_t *args )
+{
+	int idx = args->entindex;
+	vec3_t origin, angles, velocity;
+	vec3_t ShellVelocity, ShellOrigin;
+	vec3_t vecSrc, vecAiming;
+	vec3_t up, right, forward;
+	int empty = args->bparam1;
+	int silenced = args->iparam1;
+
+	VectorCopy( args->origin, origin );
+	VectorCopy( args->angles, angles );
+	VectorCopy( args->velocity, velocity );
+	AngleVectors( angles, forward, right, up );
+
+	int shell = gEngfuncs.pEventAPI->EV_FindModelIndex( "models/shell.mdl" );
+
+	if( EV_IsLocal( idx ))
+	{
+		// the view model's own events play the sound and the muzzle flash
+		EV_MuzzleFlash();
+		if( silenced )
+			gEngfuncs.pEventAPI->EV_WeaponAnimation( empty ? PP9_EV_SILENCER_SHOOT_EMPTY : PP9_EV_SILENCER_SHOOT, 1 );
+		else
+			gEngfuncs.pEventAPI->EV_WeaponAnimation( empty ? PP9_EV_SHOOT_EMPTY : PP9_EV_SHOOT, 0 );
+		V_PunchAxis( 0, -2.0 );
+	}
+	else
+	{
+		gEngfuncs.pEventAPI->EV_PlaySound( idx, origin, CHAN_WEAPON,
+			silenced ? "weapons/p99_fire_sil1.wav" : "weapons/p99_fire1.wav",
+			gEngfuncs.pfnRandomFloat( 0.92, 1.0 ), silenced ? ATTN_STATIC : ATTN_NORM, 0, 98 + gEngfuncs.pfnRandomLong( 0, 3 ));
+	}
+
+	EV_GetDefaultShellInfo( args, origin, velocity, ShellVelocity, ShellOrigin, forward, right, up, 20, -12, 4 );
+	EV_EjectBrass( ShellOrigin, ShellVelocity, angles[YAW], shell, TE_BOUNCE_SHELL );
+
+	EV_GetGunPosition( args, vecSrc, origin );
+	VectorCopy( forward, vecAiming );
+	EV_HLDM_FireBullets( idx, forward, right, up, 1, vecSrc, vecAiming, 8192, BULLET_PLAYER_9MM, 0, &g_tracerCount[idx - 1], args->fparam1, args->fparam2 );
+}
+//======================
+//	    PP9 END
 //======================
 
 //======================

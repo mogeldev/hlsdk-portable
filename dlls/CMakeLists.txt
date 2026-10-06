@@ -108,6 +108,7 @@ set (SVDLL_SOURCES
 	multiplay_gamerules.cpp
 	nf_enemy.cpp
 	nf_items.cpp
+	nf_pp9.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp

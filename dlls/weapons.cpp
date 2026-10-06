@@ -312,6 +312,10 @@ void W_Precache( void )
 	UTIL_PrecacheOtherWeapon( "weapon_9mmhandgun" );
 	UTIL_PrecacheOther( "ammo_9mmclip" );
 
+	// James Bond 007: Nightfire (dlls/nf_*.cpp)
+	UTIL_PrecacheOtherWeapon( "weapon_pp9" );
+	UTIL_PrecacheOther( "ammo_pp9" );
+
 	// mp5
 	UTIL_PrecacheOtherWeapon( "weapon_9mmAR" );
 	UTIL_PrecacheOther( "ammo_9mmAR" );

@@ -37,6 +37,7 @@ CHalfLifeRules::CHalfLifeRules( void )
 {
 	SERVER_COMMAND( "exec spserver.cfg\n" );
 	RefreshSkillData();
+	m_flNFEquipTime = 0;
 }
 
 //=========================================================
@@ -206,6 +207,14 @@ float CHalfLifeRules::FlPlayerFallDamage( CBasePlayer *pPlayer )
 //=========================================================
 void CHalfLifeRules::PlayerSpawn( CBasePlayer *pPlayer )
 {
+	// James Bond 007: Nightfire equips the player from the map's
+	// game_player_equip entities in single player too (retail PlayerSpawn
+	// touches all of them; the use-only ones, spawnflag 1, ignore that).
+	// The retail player apparently spawns after the intro movie, i.e. after
+	// the map's start triggers; here he spawns at once, and m5's intro
+	// manager would strip the equipment again (player_weaponstrip at
+	// trigger_auto + 0.5 s). So equip a little later, in PlayerThink.
+	m_flNFEquipTime = gpGlobals->time + 1.5f;
 }
 
 //=========================================================
@@ -219,6 +228,14 @@ BOOL CHalfLifeRules::AllowAutoTargetCrosshair( void )
 //=========================================================
 void CHalfLifeRules::PlayerThink( CBasePlayer *pPlayer )
 {
+	if( m_flNFEquipTime > 0 && gpGlobals->time >= m_flNFEquipTime )
+	{
+		m_flNFEquipTime = 0;
+
+		CBaseEntity *pEquip = NULL;
+		while(( pEquip = UTIL_FindEntityByClassname( pEquip, "game_player_equip" )))
+			pEquip->Touch( pPlayer );
+	}
 }
 
 //=========================================================

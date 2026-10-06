@@ -91,12 +91,6 @@ void CNightfireItem::KeyValue( KeyValueData *pkvd )
 		m_vecBBoxMax = NF_ParseVector( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
-	else if( FStrEq( pkvd->szKeyName, "Spawnflags" ))
-	{
-		// Nightfire capitalises the key; the engine only parses "spawnflags"
-		pev->spawnflags = atoi( pkvd->szValue );
-		pkvd->fHandled = TRUE;
-	}
 	else
 		CBaseAnimating::KeyValue( pkvd );
 }

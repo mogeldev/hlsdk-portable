@@ -20,6 +20,7 @@
 #include "weapons.h"
 #include "nodes.h"
 #include "player.h"
+#include "nf_weapons.h"
 
 #include "usercmd.h"
 #include "entity_state.h"
@@ -54,6 +55,7 @@ vec3_t previousorigin;
 
 // HLDM Weapon placeholder entities.
 CGlock g_Glock;
+CNightfirePP9 g_PP9;	// James Bond 007: Nightfire
 CCrowbar g_Crowbar;
 CPython g_Python;
 CMP5 g_Mp5;
@@ -607,6 +609,7 @@ void HUD_InitClientWeapons( void )
 
 	// Allocate slot(s) for each weapon that we are going to be predicting
 	HUD_PrepEntity( &g_Glock, &player );
+	HUD_PrepEntity( &g_PP9, &player );
 	HUD_PrepEntity( &g_Crowbar, &player );
 	HUD_PrepEntity( &g_Python, &player );
 	HUD_PrepEntity( &g_Mp5, &player );
@@ -685,6 +688,9 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 	{
 		case WEAPON_CROWBAR:
 			pWeapon = &g_Crowbar;
+			break;
+		case WEAPON_NF_PP9:
+			pWeapon = &g_PP9;
 			break;
 		case WEAPON_GLOCK:
 			pWeapon = &g_Glock;

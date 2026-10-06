@@ -252,6 +252,10 @@ public:
 	// Teamplay stuff	
 	virtual const char *GetTeamID( CBaseEntity *pEntity ) {return "";};
 	virtual int PlayerRelationship( CBaseEntity *pPlayer, CBaseEntity *pTarget );
+
+	// James Bond 007: Nightfire spawn equipment, given after the map's start
+	// triggers (see PlayerSpawn)
+	float m_flNFEquipTime;
 };
 
 //=========================================================

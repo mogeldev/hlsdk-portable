@@ -13,10 +13,11 @@ Keys (no Nightfire FGD; inferred from the retail maps, assumptions):
   model            character model (commando, hazmat_light, black_ops, ...)
   netname          squad name (HLSDK squads use netname as well)
   sight_dist       how far the enemy sees (512..4096 on m5/m7)
-  Spawnflags       capitalised; the low bits match the HLSDK monster flags
-                   (4 hit monsterclip, 32 squad leader, 128 wait for script),
-                   the high bits (0x4000, 0x400000, 0x2000000) are unknown
-                   and dropped
+  Spawnflags       capitalised (parsed into pev->spawnflags anyway: entvars
+                   keys match case-insensitively); the low bits match the
+                   HLSDK monster flags (4 hit monsterclip, 32 squad leader,
+                   128 wait for script), the high bits (0x4000, 0x400000,
+                   0x2000000) are unknown and masked off in Spawn
   deathtarget      fired when the enemy dies
   primary_weapon   weapon id, see g_nfEnemyWeapons (from the retail game.dll:
                    the precache switch of the enemy class, case = id - 1)
@@ -82,6 +83,7 @@ static const char *const g_nfSkillCvars[] =
 	"sk_enemy_rocket", "sk_commando_bullet", "sk_mp9_bullet", "sk_pdw90_bullet",
 	"sk_kowloon_bullet", "sk_buckshot_bullet", "sk_sniper_bullet",
 	"sk_raptor_bullet", "sk_minigun_bullet", "sk_alerted_bullet", "sk_laser_bolt",
+	"sk_plr_pp9_bullet",	// player weapons, dlls/nf_pp9.cpp ...
 };
 
 static cvar_t g_nfSkill[ARRAYSIZE( g_nfSkillCvars ) * 3];
@@ -100,7 +102,7 @@ void NF_RegisterSkillCvars( void )
 	}
 }
 
-static float NF_SkillValue( const char *base )
+float NF_SkillValue( const char *base )
 {
 	int level = g_iSkillLevel >= 1 && g_iSkillLevel <= 3 ? g_iSkillLevel : 2;
 	return CVAR_GET_FLOAT( UTIL_VarArgs( "%s%d", base, level ));
@@ -275,12 +277,6 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 		m_flWaitPatrolTime = atof( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
-	else if( FStrEq( pkvd->szKeyName, "Spawnflags" ))
-	{
-		// capitalised in Nightfire maps; the engine only parses "spawnflags"
-		pev->spawnflags = atoi( pkvd->szValue ) & NF_ENEMY_SPAWNFLAGS_HL;
-		pkvd->fHandled = TRUE;
-	}
 	else
 		CHGrunt::KeyValue( pkvd );
 }
@@ -371,6 +367,10 @@ void CNightfireEnemy::Spawn( void )
 	Precache();
 	SET_MODEL( ENT( pev ), STRING( pev->model ));
 	UTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
+
+	// "Spawnflags" (capitalised) already landed in pev->spawnflags:
+	// EntvarsKeyvalue compares key names case-insensitively
+	pev->spawnflags &= NF_ENEMY_SPAWNFLAGS_HL;
 
 	pev->solid = SOLID_SLIDEBOX;
 	pev->movetype = MOVETYPE_STEP;
