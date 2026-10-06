@@ -465,6 +465,8 @@ cvar_t sv_busters = { "sv_busters", "0" };
 
 // Register your console variables here
 // This gets called one time when the game is initialied
+void NF_RegisterSkillCvars( void );
+
 void GameDLLInit( void )
 {
 	g_psv_gravity = CVAR_GET_POINTER( "sv_gravity" );
@@ -887,6 +889,8 @@ void GameDLLInit( void )
 	CVAR_REGISTER( &sk_player_leg1 );
 	CVAR_REGISTER( &sk_player_leg2 );
 	CVAR_REGISTER( &sk_player_leg3 );
+	// James Bond 007: Nightfire characters (sk_enemy_*, sk_<weapon>_*), dlls/nf_enemy.cpp
+	NF_RegisterSkillCvars();
 // END REGISTER CVARS FOR SKILL LEVEL STUFF
 
 	CVAR_REGISTER( &sv_pushable_fixed_tick_fudge );
