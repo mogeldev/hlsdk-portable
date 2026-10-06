@@ -1561,6 +1561,12 @@ void CNodeEnt::KeyValue( KeyValueData *pkvd )
 		m_sHintActivity = (short)atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
+	else if( FStrEq( pkvd->szKeyName, "nodetype" ) )
+	{
+		// Nightfire: patrol node bits (the retail game ORs them in as well)
+		m_afNFNodeType |= atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
 	else
 		CBaseEntity::KeyValue( pkvd );
 }
@@ -1598,6 +1604,8 @@ void CNodeEnt::Spawn( void )
 	WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_flHintYaw = pev->angles.y;
 	WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_sHintType = m_sHintType;
 	WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_sHintActivity = m_sHintActivity;
+	WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_afNFNodeType = m_afNFNodeType;
+	WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_iNFGroup = pev->skin;	// Nightfire patrol group
 
 	if( FClassnameIs( pev, "info_node_air" ) )
 		WorldGraph.m_pNodes[WorldGraph.m_cNodes].m_afNodeInfo = bits_NODE_AIR;
@@ -2400,7 +2408,10 @@ int CGraph::FLoadGraph( const char *szMapName )
 	iVersion = LittleToHost( *(int *) pMemFile );
 	pMemFile += sizeof(int);
 
-	if( iVersion == GRAPH_VERSION || iVersion == GRAPH_VERSION_RETAIL )
+	// Nightfire: version 16 is also the retail Nightfire graph (assets.007
+	// maps/graphs/*.nod), whose nodes have a different layout (96 bytes);
+	// the retail compatibility path would misread it, so rebuild instead.
+	if( iVersion == GRAPH_VERSION )
 	{
 		// Read the graph class
 		//
@@ -3642,6 +3653,8 @@ void CGraph::ByteswapNodes()
 		LittleToHostSW( m_pNodes[i].m_sHintType );
 		LittleToHostSW( m_pNodes[i].m_sHintActivity );
 		LittleToHostSW( m_pNodes[i].m_flHintYaw );
+		LittleToHostSW( m_pNodes[i].m_afNFNodeType );
+		LittleToHostSW( m_pNodes[i].m_iNFGroup );
 	}
 }
 

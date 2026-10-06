@@ -59,7 +59,16 @@ public:
 	short	m_sHintType;// there is something interesting in the world at this node's position
 	short	m_sHintActivity;// there is something interesting in the world at this node's position
 	float	m_flHintYaw;// monster on this node should face this yaw to face the hint.
+
+	// James Bond 007: Nightfire info_node keys, used by enemy patrols
+	// (dlls/nf_enemy.cpp). Changing them changes the graph file format.
+	int	m_afNFNodeType;// "nodetype": NF_NODE_PATROL_* bits
+	int	m_iNFGroup;// "skin": patrol route group, 0 = none
 };
+
+#define NF_NODE_PATROL_A	16	// Nightfire nodetype bits of patrol nodes (the retail
+#define NF_NODE_PATROL_B	32	// node picker accepts either; what 32 adds is unknown)
+#define NF_NODE_PATROL		( NF_NODE_PATROL_A | NF_NODE_PATROL_B )
 
 //=========================================================
 // CLink - A link between 2 nodes
@@ -106,10 +115,11 @@ typedef struct
 // CGraph 
 //=========================================================
 #define _GRAPH_VERSION_RETAIL 16 // Retail Half-Life graph version. Don't increment this
+// Nightfire: +1 for the CNode patrol fields (m_afNFNodeType, m_iNFGroup)
 #if XASH_64BIT
-#define	_GRAPH_VERSION	(16 * 10)
+#define	_GRAPH_VERSION	(16 * 10 + 1)
 #else
-#define	_GRAPH_VERSION	(16) // !!!increment this whenever graph/node/link classes change, to obsolesce older disk files.
+#define	_GRAPH_VERSION	(17) // !!!increment this whenever graph/node/link classes change, to obsolesce older disk files.
 #endif
 #define GRAPH_VERSION (int)_GRAPH_VERSION
 #define GRAPH_VERSION_RETAIL (int)_GRAPH_VERSION_RETAIL
@@ -281,6 +291,7 @@ class CNodeEnt : public CBaseEntity
 
 	short m_sHintType;
 	short m_sHintActivity;
+	int m_afNFNodeType;	// Nightfire "nodetype"
 };
 
 //=========================================================

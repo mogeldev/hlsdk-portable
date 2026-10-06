@@ -24,8 +24,20 @@ Keys (no Nightfire FGD; inferred from the retail maps, assumptions):
   num_grenades     hand grenades to throw
   char_name        voice directory: sound/<char_name>/pain|die|combatN.wav
   voice_pitch      voice pitch (100 on m5)
+  minpatroldist / maxpatroldist  straight-line range to the next patrol node
+                   (maxpatroldist 0 = stand guard)
+  maxpatrolpath    longest node-graph route to the next patrol node
+  waitpatroltime   seconds to wait at each patrol node
   TriggerTarget / TriggerCondition: parsed by CBaseMonster; the Nightfire
                    condition values (e.g. 4362) are not HLSDK conditions
+
+Patrols (from the retail game.dll, the node picker at 0x4203b390): patrol
+nodes are info_node with nodetype 16 or 32 (what 32 adds is unknown; it does
+not mean running); their skin is the route group. Idle enemies walk the
+route, alerted ones run (the retail "Walk Patrol" / "Run Patrol" schedules
+are chosen by the enemy's state). The enemy walks to the nearest (by route length) patrol node of
+the group of the node it stands on, skipping the node it is on, the previous
+one and the last 10 visited, within the patrol distances.
 
 Damage and health come from the retail skill.cfg (sk_enemy_*, sk_<weapon>_*),
 whose cvars are registered by NF_RegisterSkillCvars().
@@ -42,10 +54,24 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "studio.h"
 #include "animation.h"
 #include "hgrunt.h"
+#include "nodes.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
 #define NF_ENEMY_SPAWNFLAGS_HL	0x3FF
 #define NF_ENEMY_MAX_VOICE	9	// the retail code formats %s/pain%d.wav up to 9
+#define NF_PATROL_HISTORY	10	// visited patrol nodes remembered (retail: 10)
+#define NF_PATROL_MAX_CAND	20	// candidates sorted by route length (retail: 20)
+
+enum
+{
+	SCHED_NF_PATROL = LAST_COMMON_SCHEDULE + 100,
+};
+
+enum
+{
+	TASK_NF_PATROL_MOVE = LAST_COMMON_TASK + 100,	// pick the next patrol node, start moving
+	TASK_NF_PATROL_WAIT,				// stand waitpatroltime at the node
+};
 
 //=========================================================
 // skill.cfg cvars of the Nightfire characters
@@ -130,6 +156,12 @@ public:
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
 	void Killed( entvars_t *pevAttacker, int iGib );
 	BOOL FOkToSpeak( void ) { return FALSE; }	// no HG_* sentence groups in Nightfire
+	Schedule_t *GetSchedule( void );
+	Schedule_t *GetScheduleOfType( int Type );
+	void StartTask( Task_t *pTask );
+	void RunTask( Task_t *pTask );
+
+	CUSTOM_SCHEDULES
 
 	virtual int Save( CSave &save );
 	virtual int Restore( CRestore &restore );
@@ -141,6 +173,8 @@ private:
 	void NFShoot( void );
 	void PlayVoice( const char *kind, int count, float attn );
 	int CountVoice( const char *kind );
+	BOOL StartPatrolMove( void );
+	BOOL InPatrolHistory( int node );
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -150,6 +184,15 @@ private:
 	int m_cGrenades;
 	int m_cPain, m_cDie, m_cCombat;
 	float m_flNextCombatTalk;
+
+	float m_flMinPatrolDist;
+	float m_flMaxPatrolDist;
+	float m_flMaxPatrolPath;
+	float m_flWaitPatrolTime;
+	int m_iPatrolNodes[NF_PATROL_HISTORY];	// visited, ring buffer, -1 = empty
+	int m_iPatrolIdx;
+	int m_iPatrolTarget;
+	float m_flNextPatrolTime;
 };
 
 TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
@@ -161,6 +204,14 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_iGunIndex, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_cGrenades, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_flNextCombatTalk, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireEnemy, m_flMinPatrolDist, FIELD_FLOAT ),
+	DEFINE_FIELD( CNightfireEnemy, m_flMaxPatrolDist, FIELD_FLOAT ),
+	DEFINE_FIELD( CNightfireEnemy, m_flMaxPatrolPath, FIELD_FLOAT ),
+	DEFINE_FIELD( CNightfireEnemy, m_flWaitPatrolTime, FIELD_FLOAT ),
+	DEFINE_ARRAY( CNightfireEnemy, m_iPatrolNodes, FIELD_INTEGER, NF_PATROL_HISTORY ),
+	DEFINE_FIELD( CNightfireEnemy, m_iPatrolIdx, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_iPatrolTarget, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_flNextPatrolTime, FIELD_TIME ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -202,6 +253,26 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	else if( FStrEq( pkvd->szKeyName, "voice_pitch" ))
 	{
 		m_voicePitch = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "minpatroldist" ))
+	{
+		m_flMinPatrolDist = atof( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "maxpatroldist" ))
+	{
+		m_flMaxPatrolDist = atof( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "maxpatrolpath" ))
+	{
+		m_flMaxPatrolPath = atof( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "waitpatroltime" ))
+	{
+		m_flWaitPatrolTime = atof( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
 	else if( FStrEq( pkvd->szKeyName, "Spawnflags" ))
@@ -333,6 +404,13 @@ void CNightfireEnemy::Spawn( void )
 	int group = FindBodygroup( "weapons" );
 	if( group >= 0 )
 		SetBodygroup( group, m_iGunIndex );
+
+	for( int i = 0; i < NF_PATROL_HISTORY; i++ )
+		m_iPatrolNodes[i] = -1;
+	m_iPatrolIdx = 0;
+	m_iPatrolTarget = -1;
+	if( m_flMaxPatrolPath <= 0 )
+		m_flMaxPatrolPath = 2048;	// [assumed] the value on most retail enemies
 
 	MonsterInit();
 
@@ -572,4 +650,229 @@ void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 		FireTargets( STRING( m_iszDeathTarget ), CBaseEntity::Instance( pevAttacker ), this, USE_TOGGLE, 0 );
 
 	CHGrunt::Killed( pevAttacker, iGib );
+}
+
+//=========================================================
+// Patrols
+//=========================================================
+Task_t tlNFPatrol[] =
+{
+	{ TASK_NF_PATROL_MOVE, (float)0 },
+	{ TASK_WAIT_FOR_MOVEMENT, (float)0 },
+	{ TASK_NF_PATROL_WAIT, (float)0 },
+};
+
+Schedule_t slNFPatrol[] =
+{
+	{
+		tlNFPatrol,
+		ARRAYSIZE( tlNFPatrol ),
+		bits_COND_NEW_ENEMY |
+		bits_COND_SEE_ENEMY |
+		bits_COND_SEE_FEAR |
+		bits_COND_LIGHT_DAMAGE |
+		bits_COND_HEAVY_DAMAGE |
+		bits_COND_PROVOKED |
+		bits_COND_HEAR_SOUND,
+		bits_SOUND_COMBAT |
+		bits_SOUND_PLAYER |
+		bits_SOUND_DANGER,
+		"NFPatrol"
+	},
+};
+
+DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
+{
+	slNFPatrol,
+};
+
+IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
+
+BOOL CNightfireEnemy::InPatrolHistory( int node )
+{
+	for( int i = 0; i < NF_PATROL_HISTORY; i++ )
+	{
+		if( m_iPatrolNodes[i] == node )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+// Pick the next patrol node and start moving there (retail: the node picker
+// at 0x4203b390). Candidates: patrol nodes of the current node's group (both
+// groups > 0 must match), not the current/previous/recently visited node,
+// straight-line distance in [min, max], route length in [min, maxpath];
+// tried nearest route first until a route can be built.
+BOOL CNightfireEnemy::StartPatrolMove( void )
+{
+	if( m_flMaxPatrolDist <= 0 || !WorldGraph.m_fGraphPresent || !WorldGraph.m_fGraphPointersSet )
+		return FALSE;
+
+	// Standing on the last patrol target: that is the current node.
+	// FindNearestNode may return a plain node beside it, which would make
+	// the target itself the next candidate (instant arrival, endless loop).
+	int iCur;
+	if( m_iPatrolTarget >= 0 && m_iPatrolTarget < WorldGraph.m_cNodes &&
+		( WorldGraph.m_pNodes[m_iPatrolTarget].m_vecOrigin - pev->origin ).Length2D() < 64 )
+		iCur = m_iPatrolTarget;
+	else
+		iCur = WorldGraph.FindNearestNode( pev->origin, this );
+	if( iCur < 0 )
+		return FALSE;
+
+	const int iHull = WorldGraph.HullIndex( this );
+	const int iGroup = WorldGraph.m_pNodes[iCur].m_iNFGroup;
+	const int iPrev = m_iPatrolNodes[( m_iPatrolIdx + NF_PATROL_HISTORY - 1 ) % NF_PATROL_HISTORY];
+
+	int cand[NF_PATROL_MAX_CAND];
+	float candLen[NF_PATROL_MAX_CAND];
+	int nCand = 0;
+
+	for( int i = 0; i < WorldGraph.m_cNodes; i++ )
+	{
+		const CNode &node = WorldGraph.m_pNodes[i];
+
+		if( i == iCur || i == iPrev || !( node.m_afNFNodeType & NF_NODE_PATROL ) || InPatrolHistory( i ))
+			continue;
+		if( iGroup > 0 && node.m_iNFGroup > 0 && node.m_iNFGroup != iGroup )
+			continue;
+
+		float flDist = ( node.m_vecOrigin - pev->origin ).Length();
+		if( flDist < m_flMinPatrolDist || flDist > m_flMaxPatrolDist )
+			continue;
+		if( ( node.m_vecOrigin - pev->origin ).Length2D() < 32 )
+			continue;	// already there
+
+		int iPath[MAX_PATH_SIZE];
+		int nPath = WorldGraph.FindShortestPath( iPath, iCur, i, iHull, m_afCapability );
+		if( nPath < 2 )
+			continue;
+
+		float flLen = 0;
+		for( int k = 1; k < nPath; k++ )
+			flLen += ( WorldGraph.m_pNodes[iPath[k]].m_vecOrigin - WorldGraph.m_pNodes[iPath[k - 1]].m_vecOrigin ).Length();
+		if( flLen < m_flMinPatrolDist || flLen > m_flMaxPatrolPath )
+			continue;
+
+		// insert sorted by route length, keeping the nearest NF_PATROL_MAX_CAND
+		int k;
+		if( nCand < NF_PATROL_MAX_CAND )
+			k = nCand++;
+		else if( flLen < candLen[NF_PATROL_MAX_CAND - 1] )
+			k = NF_PATROL_MAX_CAND - 1;
+		else
+			continue;
+		while( k > 0 && candLen[k - 1] > flLen )
+		{
+			cand[k] = cand[k - 1];
+			candLen[k] = candLen[k - 1];
+			k--;
+		}
+		cand[k] = i;
+		candLen[k] = flLen;
+	}
+
+	for( int c = 0; c < nCand; c++ )
+	{
+		const CNode &node = WorldGraph.m_pNodes[cand[c]];
+
+		// the retail AI picks "Walk Patrol" or "Run Patrol" by the enemy's
+		// state, not by the node type: run only when alerted
+		Activity act = m_MonsterState == MONSTERSTATE_ALERT ? ACT_RUN : ACT_WALK;
+
+		if( !MoveToLocation( act, 2, node.m_vecOrigin ))
+			continue;
+
+		m_iPatrolTarget = cand[c];
+		// remember the patrol node we are leaving
+		if(( WorldGraph.m_pNodes[iCur].m_afNFNodeType & NF_NODE_PATROL ) && !InPatrolHistory( iCur ))
+		{
+			m_iPatrolNodes[m_iPatrolIdx] = iCur;
+			m_iPatrolIdx = ( m_iPatrolIdx + 1 ) % NF_PATROL_HISTORY;
+		}
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+Schedule_t *CNightfireEnemy::GetSchedule( void )
+{
+	if(( m_MonsterState == MONSTERSTATE_IDLE || m_MonsterState == MONSTERSTATE_ALERT ) &&
+		m_flMaxPatrolDist > 0 && gpGlobals->time >= m_flNextPatrolTime &&
+		!HasConditions( bits_COND_NEW_ENEMY | bits_COND_SEE_ENEMY | bits_COND_SEE_FEAR |
+			bits_COND_LIGHT_DAMAGE | bits_COND_HEAVY_DAMAGE | bits_COND_PROVOKED |
+			bits_COND_HEAR_SOUND | bits_COND_ENEMY_DEAD ))
+		return GetScheduleOfType( SCHED_NF_PATROL );
+
+	return CHGrunt::GetSchedule();
+}
+
+Schedule_t *CNightfireEnemy::GetScheduleOfType( int Type )
+{
+	if( Type == SCHED_NF_PATROL )
+		return slNFPatrol;
+
+	// a patrol route that fails on the way (blocked): stand a moment and
+	// try again instead of the grunt's fail schedule (TASK_WAIT_PVS)
+	if( Type == SCHED_FAIL && m_pSchedule == slNFPatrol )
+	{
+		m_flNextPatrolTime = gpGlobals->time + RANDOM_FLOAT( 3, 6 );
+		return CHGrunt::GetScheduleOfType( SCHED_IDLE_STAND );
+	}
+
+	return CHGrunt::GetScheduleOfType( Type );
+}
+
+void CNightfireEnemy::StartTask( Task_t *pTask )
+{
+	switch( pTask->iTask )
+	{
+	case TASK_NF_PATROL_MOVE:
+		if( StartPatrolMove())
+		{
+			TaskComplete();
+			break;
+		}
+
+		// everything visited (or nothing reachable): forget the history and
+		// try once more, else stand for a while
+		for( int i = 0; i < NF_PATROL_HISTORY; i++ )
+			m_iPatrolNodes[i] = -1;
+		m_iPatrolIdx = 0;
+		if( !StartPatrolMove())
+		{
+			// stand for a while; no TaskFail: the grunt's fail schedule ends
+			// in TASK_WAIT_PVS, which waits as long as a player is in the PVS
+			m_flNextPatrolTime = gpGlobals->time + RANDOM_FLOAT( 5, 10 );
+		}
+		TaskComplete();
+		break;
+	case TASK_NF_PATROL_WAIT:
+		if( m_flWaitPatrolTime <= 0 )
+		{
+			TaskComplete();
+			break;
+		}
+		m_IdealActivity = m_MonsterState == MONSTERSTATE_ALERT ? ACT_IDLE_ANGRY : ACT_IDLE;
+		m_flWaitFinished = gpGlobals->time + m_flWaitPatrolTime;
+		break;
+	default:
+		CHGrunt::StartTask( pTask );
+		break;
+	}
+}
+
+void CNightfireEnemy::RunTask( Task_t *pTask )
+{
+	switch( pTask->iTask )
+	{
+	case TASK_NF_PATROL_WAIT:
+		if( gpGlobals->time >= m_flWaitFinished )
+			TaskComplete();
+		break;
+	default:
+		CHGrunt::RunTask( pTask );
+		break;
+	}
 }
