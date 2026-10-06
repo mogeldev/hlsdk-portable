@@ -1531,18 +1531,21 @@ StudioCalcAttachments
 */
 void CStudioModelRenderer::StudioCalcAttachments( void )
 {
-	int i;
+	int i, num = m_pStudioHeader->numattachments;
 	mstudioattachment_t *pattachment;
 
-	if( m_pStudioHeader->numattachments > 4 )
+	// cl_entity_t holds CL_ENTITY_MAX_ATTACHMENTS; compute the first ones of a
+	// model with more (e.g. Nightfire's old_truck.mdl, 9) instead of exiting
+	if( num > CL_ENTITY_MAX_ATTACHMENTS )
 	{
-		gEngfuncs.Con_DPrintf( "Too many attachments on %s\n", m_pCurrentEntity->model->name );
-		exit( -1 );
+		gEngfuncs.Con_DPrintf( "Too many attachments on %s (%d), using the first %d\n",
+			m_pCurrentEntity->model->name, num, CL_ENTITY_MAX_ATTACHMENTS );
+		num = CL_ENTITY_MAX_ATTACHMENTS;
 	}
 
 	// calculate attachment points
 	pattachment = (mstudioattachment_t *)( (byte *)m_pStudioHeader + m_pStudioHeader->attachmentindex );
-	for( i = 0; i < m_pStudioHeader->numattachments; i++ )
+	for( i = 0; i < num; i++ )
 	{
 		VectorTransform( pattachment[i].org, (*m_plighttransform)[pattachment[i].bone], m_pCurrentEntity->attachment[i] );
 	}

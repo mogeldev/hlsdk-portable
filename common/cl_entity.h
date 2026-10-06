@@ -60,6 +60,12 @@ typedef struct cl_entity_s cl_entity_t;
 #define HISTORY_MAX		64		// Must be power of 2
 #define HISTORY_MASK	( HISTORY_MAX - 1 )
 
+// James Bond 007: Nightfire (PC) characters have up to 8 attachments (GoldSrc
+// had 4). This changes the layout of cl_entity_t (and TEMPENTITY): it must
+// match the engine (mogeldev/xash3d-fwgs branch nightfire), as in
+// nightfire-open (CL_ENTITY_MAX_ATTACHMENTS 8).
+#define CL_ENTITY_MAX_ATTACHMENTS	8
+
 #include "entity_state.h"
 #include "event_args.h"
 
@@ -88,7 +94,7 @@ struct cl_entity_s
 	vec3_t		angles;
 
 	// Attachment points
-	vec3_t		attachment[4];
+	vec3_t		attachment[CL_ENTITY_MAX_ATTACHMENTS];
 
 	// Other entity local information
 	int		trivial_accept;

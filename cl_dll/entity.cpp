@@ -458,10 +458,8 @@ void BeamEndModel( void )
 	model->origin[0] = player->origin[0] - 100;
 	model->origin[1] = player->origin[1];
 
-	model->attachment[0] = model->origin;
-	model->attachment[1] = model->origin;
-	model->attachment[2] = model->origin;
-	model->attachment[3] = model->origin;
+	for( int i = 0; i < CL_ENTITY_MAX_ATTACHMENTS; i++ )
+		model->attachment[i] = model->origin;
 
 	gEngfuncs.CL_CreateVisibleEntity( ET_NORMAL, model );
 }
