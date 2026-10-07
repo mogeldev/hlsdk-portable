@@ -23,6 +23,8 @@
 #include "decals.h"
 #include "func_break.h"
 #include "shake.h"
+#include "skill.h"
+#include "nf_debug.h"
 
 #define	SF_GIBSHOOTER_REPEATABLE		1 // allows a gibshooter to be refired
 
@@ -1957,10 +1959,22 @@ public:
 	void Precache( void );
 	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void KeyValue( KeyValueData *pkvd );
+
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
 private:
+	int m_iSkillLevel;	// Nightfire: shown only while the skill is <= it (0 = always)
 };
 
 LINK_ENTITY_TO_CLASS( env_message, CMessage )
+
+TYPEDESCRIPTION CMessage::m_SaveData[] =
+{
+	DEFINE_FIELD( CMessage, m_iSkillLevel, FIELD_INTEGER ),
+};
+
+IMPLEMENT_SAVERESTORE( CMessage, CPointEntity )
 
 void CMessage::Spawn( void )
 {
@@ -2018,6 +2032,11 @@ void CMessage::KeyValue( KeyValueData *pkvd )
 		pev->impulse = atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
+	else if( FStrEq( pkvd->szKeyName, "skilllevel" ) )
+	{
+		m_iSkillLevel = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
 	else
 		CPointEntity::KeyValue( pkvd );
 }
@@ -2025,6 +2044,19 @@ void CMessage::KeyValue( KeyValueData *pkvd )
 void CMessage::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 {
 	CBaseEntity *pPlayer = NULL;
+
+	// Nightfire (retail Use 0x4204c630): nothing at all above the skill level
+	if( m_iSkillLevel > 0 && gSkillData.iSkillLevel > m_iSkillLevel )
+	{
+		if( NF_DEBUG( NF_DBG_TRIGGERS ) )
+			ALERT( at_console, "nf_debug: env_message %s skipped (skill %d > %d)\n",
+				STRING( pev->targetname ), gSkillData.iSkillLevel, m_iSkillLevel );
+		return;
+	}
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ) )
+		ALERT( at_console, "nf_debug: env_message %s \"%s\"%s\n", STRING( pev->targetname ),
+			STRING( pev->message ), ( pev->spawnflags & SF_MESSAGE_ALL ) ? " to all" : "" );
 
 	if( pev->spawnflags & SF_MESSAGE_ALL )
 		UTIL_ShowMessageAll( STRING( pev->message ) );

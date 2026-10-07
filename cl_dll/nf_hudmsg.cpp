@@ -27,9 +27,19 @@ scoreboard key (+showscores) opens it (retail 0x41046e10 toggles it on
 press and closes it on release, 0x41046e50); it lists the objectives and
 the hint section. NF_ObjectivesShowOverview is called from input.cpp.
 
-Not the retail look yet: plain boxes in the style of the text HUD fallback
-(hud_redraw.cpp); the hint stays on screen for the duration (retail: kept
-in the panel) [assumed].
+Look: the retail images (the engine fork loads image files given to
+SPR_Load as one-frame sprites), drawn with TriAPI, scaled by screen height
+/ 768 like retail, left margin screen height / 30. Message box
+(CObjectivePanel, 0x41042510): gui/hud/hud_objective_bg.png (1024x128),
+bottom 72 px above the screen bottom; objective overview
+(CObjectiveOverviewPanel, 0x410422b0): gui/hud/hud_objectives_hint_bg.png
+(512x512, "OBJECTIVES:" and "HINTS:" are part of the image), bottom 80 px
+above the screen bottom, entries with gui/hud/check.png / circle.png. Both
+are moved up when they would cover the port's health panel. Text offsets
+inside the panels, the slide-in animation and the retail font are not
+traced [assumed]. The hint box (hint section while the overview is closed)
+is the port's own plain box; retail keeps hints in the overview only and
+flashes the HUD [assumed: shown for the duration].
 */
 
 #include <string.h>
@@ -40,6 +50,7 @@ in the panel) [assumed].
 #include "parsemsg.h"
 #include "nf_debug.h"
 #include "nf_hudmsg.h"
+#include "triangleapi.h"
 
 #define NF_MSG_LINES		12
 #define NF_MSG_LINELEN		256
@@ -69,6 +80,21 @@ typedef struct
 static nf_objentry_t s_obj[NF_OBJ_MAX];	// objective list, in arrival order
 static int s_objCount;
 static bool s_overview;			// objective overview open
+
+// retail panel images (0 = not found: plain boxes)
+static HSPRITE s_hBoxBg, s_hOverviewBg, s_hCheck, s_hCircle;
+
+// retail layout: images are scaled by screen height / 768
+static float NF_PanelScale( void )
+{
+	return ScreenHeight / 768.0f;
+}
+
+// top of the port's health panel (hud_redraw.cpp DrawNightfireStatus)
+static int NF_HealthPanelTop( void )
+{
+	return ScreenHeight - YRES( 58 );
+}
 
 // word-wrap text (with '\n' paragraphs) into box lines no wider than maxWidth pixels
 static void NF_WrapText( nf_msgbox_t *box, const char *text, int maxWidth )
@@ -135,9 +161,35 @@ static int NF_HintWidth( void )
 	return XRES( 300 );
 }
 
+// text width inside the message box
 static int NF_TimedWidth( void )
 {
+	if( s_hBoxBg )
+		return (int)( 1024 * NF_PanelScale() * 0.8f );
 	return XRES( 420 );
+}
+
+static void NF_DrawImage( HSPRITE hspr, int x, int y, int w, int h, float alpha )
+{
+	const struct model_s *model = gEngfuncs.GetSpritePointer( hspr );
+	if( !model )
+		return;
+
+	gEngfuncs.pTriAPI->SpriteTexture( (struct model_s *)model, 0 );
+	gEngfuncs.pTriAPI->RenderMode( kRenderTransAlpha );
+	gEngfuncs.pTriAPI->CullFace( TRI_NONE );
+	gEngfuncs.pTriAPI->Color4f( 1.0f, 1.0f, 1.0f, alpha );
+	gEngfuncs.pTriAPI->Begin( TRI_QUADS );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 0.0f );
+		gEngfuncs.pTriAPI->Vertex3f( x, y, 0.0f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 0.0f );
+		gEngfuncs.pTriAPI->Vertex3f( x + w, y, 0.0f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 1.0f );
+		gEngfuncs.pTriAPI->Vertex3f( x + w, y + h, 0.0f );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 1.0f );
+		gEngfuncs.pTriAPI->Vertex3f( x, y + h, 0.0f );
+	gEngfuncs.pTriAPI->End();
+	gEngfuncs.pTriAPI->RenderMode( kRenderNormal );
 }
 
 // text of a title from maps/<map>.tit (a leading '#' is skipped; unknown names stay as they are)
@@ -287,10 +339,61 @@ static void NF_DrawBox( const nf_msgbox_t *box, int x, int y, int width, int lin
 		DrawConsoleString( x + padX, y + padY + i * lineHeight, box->lines[i] );
 }
 
-// objective overview: centred panel with the objective list and the hint section
+// objective overview with the retail image (lower left, see the header)
+static void NF_DrawOverviewImage( int lineHeight )
+{
+	static nf_msgbox_t entry[NF_OBJ_MAX];
+	float s = NF_PanelScale();
+	int size = (int)( 512 * s );
+	int x = ScreenHeight / 30;
+	int bottom = ScreenHeight - 80;
+	if( bottom > NF_HealthPanelTop() - YRES( 4 ))
+		bottom = NF_HealthPanelTop() - YRES( 4 );
+	int y = bottom - size;
+
+	NF_DrawImage( s_hOverviewBg, x, y, size, size, 1.0f );
+
+	// objectives: below the "OBJECTIVES:" label, above the hint section (image rows 44-355)
+	int icon = (int)( 24 * s );
+	int textX = x + (int)( 52 * s );
+	int textW = size - (int)( 70 * s );
+	int ty = y + (int)( 44 * s );
+	int listEnd = y + (int)( 355 * s );
+
+	for( int i = 0; i < s_objCount && ty + lineHeight <= listEnd; i++ )
+	{
+		NF_WrapText( &entry[i], s_obj[i].text, textW );
+		HSPRITE mark = s_obj[i].completed ? s_hCheck : s_hCircle;
+		if( mark )
+			NF_DrawImage( mark, x + (int)( 18 * s ), ty + ( lineHeight - icon ) / 2, icon, icon, 1.0f );
+
+		if( s_obj[i].completed )
+			DrawSetTextColor( 0.7f, 0.7f, 0.7f );
+		else
+			DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+		for( int l = 0; l < entry[i].numLines && ty + lineHeight <= listEnd; l++, ty += lineHeight )
+			DrawConsoleString( textX, ty, entry[i].lines[l] );
+		ty += lineHeight / 3;
+	}
+
+	// hints: below the "HINTS:" label (image rows 395-500)
+	ty = y + (int)( 395 * s );
+	int hintEnd = y + (int)( 500 * s );
+	DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+	for( int l = 0; l < s_hint.numLines && ty + lineHeight <= hintEnd; l++, ty += lineHeight )
+		DrawConsoleString( x + (int)( 22 * s ), ty, s_hint.lines[l] );
+}
+
+// objective overview: centred plain panel with the objective list and the hint section
 static void NF_DrawOverview( int lineHeight )
 {
 	static nf_msgbox_t entry[NF_OBJ_MAX];
+	if( s_hOverviewBg )
+	{
+		NF_DrawOverviewImage( lineHeight );
+		return;
+	}
+
 	int width = XRES( 460 );
 	int padX = XRES( 14 ), padY = YRES( 10 ), mark = XRES( 18 );
 	int lines = 1;	// title
@@ -375,6 +478,12 @@ void NF_HudMsgReset( void )
 	memset( &s_hint, 0, sizeof( s_hint ));
 	memset( &s_timed, 0, sizeof( s_timed ));
 	s_overview = false;
+
+	// sprites are freed on a map change: load the panel images again
+	s_hBoxBg = SPR_Load( "gui/hud/hud_objective_bg.png" );
+	s_hOverviewBg = SPR_Load( "gui/hud/hud_objectives_hint_bg.png" );
+	s_hCheck = SPR_Load( "gui/hud/check.png" );
+	s_hCircle = SPR_Load( "gui/hud/circle.png" );
 }
 
 void NF_HudMsgDraw( float flTime )
@@ -392,16 +501,40 @@ void NF_HudMsgDraw( float flTime )
 		return;
 	}
 
-	if( s_hint.numLines > 0 && flTime < s_hint.endTime )
-	{
-		int height = s_hint.numLines * lineHeight + YRES( 7 ) * 2;
-		int y = ScreenHeight - YRES( 58 ) - YRES( 8 ) - height;	// above the health panel
-		NF_DrawBox( &s_hint, XRES( 16 ), y, NF_HintWidth(), lineHeight, XRES( 9 ), YRES( 7 ));
-	}
+	int hintBottom = NF_HealthPanelTop() - YRES( 8 );	// above the health panel
 
 	if( s_timed.numLines > 0 && flTime < s_timed.endTime )
 	{
-		int width = NF_TimedWidth();
-		NF_DrawBox( &s_timed, ( ScreenWidth - width ) / 2, ScreenHeight * 3 / 10, width, lineHeight, XRES( 12 ), YRES( 10 ));
+		if( s_hBoxBg )
+		{
+			// retail message box, lower left; the text centred in the image height
+			float s = NF_PanelScale();
+			int w = (int)( 1024 * s ), h = (int)( 128 * s );
+			int bottom = ScreenHeight - 72;
+			if( bottom > NF_HealthPanelTop() - YRES( 4 ))
+				bottom = NF_HealthPanelTop() - YRES( 4 );
+			int x = ScreenHeight / 30, y = bottom - h;
+			hintBottom = y - YRES( 4 );	// the hint box goes above it
+			NF_DrawImage( s_hBoxBg, x, y, w, h, 1.0f );
+
+			int lines = s_timed.numLines;
+			int ty = y + ( h - lines * lineHeight ) / 2;
+			if( ty < y )
+				ty = y;
+			DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+			for( int i = 0; i < lines; i++ )
+				DrawConsoleString( x + (int)( 40 * s ), ty + i * lineHeight, s_timed.lines[i] );
+		}
+		else
+		{
+			int width = NF_TimedWidth();
+			NF_DrawBox( &s_timed, ( ScreenWidth - width ) / 2, ScreenHeight * 3 / 10, width, lineHeight, XRES( 12 ), YRES( 10 ));
+		}
+	}
+
+	if( s_hint.numLines > 0 && flTime < s_hint.endTime )
+	{
+		int height = s_hint.numLines * lineHeight + YRES( 7 ) * 2;
+		NF_DrawBox( &s_hint, XRES( 16 ), hintBottom - height, NF_HintWidth(), lineHeight, XRES( 9 ), YRES( 7 ));
 	}
 }

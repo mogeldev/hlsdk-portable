@@ -56,9 +56,14 @@ trigger_endgame
 	and 2 play common/stinger.wav at the player (ambient, vol 1, attn
 	1.25); 2 also sets the retail cvars sv_newunit / sv_iamdone (not in
 	this port) and sends the engine command "CL_GameSuccess" (leave the
-	game, m9_outro). Status 0 (bond_death.wav, 5 s fade to black, a client
-	message, game rules timer +10 s; gamerules vtable slot 29, 0x420c2900,
-	then cd track 3) is not implemented yet: only the nf_debug line.
+	game, m9_outro). Status 0 = mission failed (retail CBondRules vtable
+	slot 29, 0x420c2900, and Think 0x420c2260): common/bond_death.wav at
+	the player (ambient, vol 1, attn 1.25), fade to black (5 s, hold 15 s),
+	the player loses all items (0x420a6b40), 10 s later a second fade
+	(2 s, hold 2 s) and the engine command "CL_QuitToMenu" (leave the
+	game, load dialog). The timer lives in this entity instead of the game
+	rules. Not ported: the client message "SetBlends" 0 and svc_cdtrack 3
+	(music), and the global byte 0x4215b7c0 that every Use sets.
 */
 
 #include "extdll.h"
@@ -68,6 +73,7 @@ trigger_endgame
 #include "skill.h"
 #include "saverestore.h"
 #include "gamerules.h"
+#include "shake.h"
 #include "nf_debug.h"
 #include "nf_triggers.h"
 
@@ -553,10 +559,13 @@ public:
 	void Precache( void );
 	void KeyValue( KeyValueData *pkvd );
 	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+	void EXPORT QuitToMenuThink( void );
 
 	virtual int Save( CSave &save );
 	virtual int Restore( CRestore &restore );
 	static TYPEDESCRIPTION m_SaveData[];
+
+	void MissionFailed( CBasePlayer *pPlayer );
 
 	int m_iStatus;
 };
@@ -579,6 +588,7 @@ void CTriggerEndGame::Spawn( void )
 void CTriggerEndGame::Precache( void )
 {
 	PRECACHE_SOUND( "common/stinger.wav" );
+	PRECACHE_SOUND( "common/bond_death.wav" );
 }
 
 void CTriggerEndGame::KeyValue( KeyValueData *pkvd )
@@ -598,14 +608,43 @@ void CTriggerEndGame::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TY
 	CBaseEntity *pPlayer = ( pActivator && pActivator->IsPlayer( )) ? pActivator : UTIL_PlayerByIndex( 1 );
 
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
-		ALERT( at_console, "nf_debug: endgame %s status %d%s\n", STRING( pev->targetname ), m_iStatus,
-			m_iStatus == NF_ENDGAME_FAILED ? " (mission failed: not implemented)" : "" );
+		ALERT( at_console, "nf_debug: endgame %s status %d\n", STRING( pev->targetname ), m_iStatus );
 
-	if( !pPlayer || m_iStatus == NF_ENDGAME_FAILED )
+	if( !pPlayer )
 		return;
+
+	if( m_iStatus == NF_ENDGAME_FAILED )
+	{
+		MissionFailed( (CBasePlayer *)pPlayer );
+		return;
+	}
 
 	UTIL_EmitAmbientSound( pPlayer->edict(), pPlayer->pev->origin, "common/stinger.wav", 1.0f, 1.25f, 0, PITCH_NORM );
 
 	if( m_iStatus == NF_ENDGAME_WON )
 		SERVER_COMMAND( "CL_GameSuccess\n" );
+}
+
+void CTriggerEndGame::MissionFailed( CBasePlayer *pPlayer )
+{
+	UTIL_EmitAmbientSound( pPlayer->edict(), pPlayer->pev->origin, "common/bond_death.wav", 1.0f, 1.25f, 0, PITCH_NORM );
+	UTIL_ScreenFade( pPlayer, g_vecZero, 5.0f, 15.0f, 255, FFADE_OUT );
+	pPlayer->RemoveAllItems( FALSE );
+
+	// retail: game rules timer, time + 10
+	SetThink( &CTriggerEndGame::QuitToMenuThink );
+	pev->nextthink = gpGlobals->time + 10.0f;
+}
+
+void CTriggerEndGame::QuitToMenuThink( void )
+{
+	SetThink( NULL );
+
+	CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
+	if( pPlayer )
+		UTIL_ScreenFade( pPlayer, g_vecZero, 2.0f, 2.0f, 255, FFADE_OUT );
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: endgame %s mission failed -> CL_QuitToMenu\n", STRING( pev->targetname ));
+	SERVER_COMMAND( "CL_QuitToMenu\n" );
 }
