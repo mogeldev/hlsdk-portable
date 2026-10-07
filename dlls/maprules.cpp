@@ -29,6 +29,7 @@
 //#include "maprules.h" //empty file
 #include "cbase.h"
 #include "player.h"
+#include "nf_debug.h"
 
 class CRuleEntity : public CBaseEntity
 {
@@ -749,6 +750,7 @@ private:
 
 	string_t	m_weaponNames[MAX_EQUIP];
 	int			m_weaponCount[MAX_EQUIP];
+	string_t	m_iszDefaultWeapon;	// Nightfire "default_weapon": selected after equipping
 };
 
 LINK_ENTITY_TO_CLASS( game_player_equip, CGamePlayerEquip )
@@ -756,6 +758,14 @@ LINK_ENTITY_TO_CLASS( game_player_equip, CGamePlayerEquip )
 void CGamePlayerEquip::KeyValue( KeyValueData *pkvd )
 {
 	CRulePointEntity::KeyValue( pkvd );
+
+	// Nightfire: the weapon to hold after equipping, not an item to give
+	// (retail KeyValue 0x4207c380 -> +0x38)
+	if( !pkvd->fHandled && FStrEq( pkvd->szKeyName, "default_weapon" ))
+	{
+		m_iszDefaultWeapon = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
 
 	if( !pkvd->fHandled )
 	{
@@ -792,13 +802,22 @@ void CGamePlayerEquip::EquipPlayer( CBaseEntity *pEntity )
 {
 	CBasePlayer *pPlayer = NULL;
 
-	if( pEntity->IsPlayer() )
+	// Nightfire (retail EquipPlayer 0x4207c480): without a player activator
+	// (multi_manager chains fire with none, which crashed here) equip player 1
+	if( !pEntity || !pEntity->IsPlayer() )
+		pEntity = UTIL_PlayerByIndex( 1 );
+
+	if( pEntity && pEntity->IsPlayer() )
 	{
 		pPlayer = (CBasePlayer *)pEntity;
 	}
 
 	if( !pPlayer )
+	{
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: equip %s: no player\n", STRING( pev->targetname ));
 		return;
+	}
 
 	for( int i = 0; i < MAX_EQUIP; i++ )
 	{
@@ -813,6 +832,15 @@ void CGamePlayerEquip::EquipPlayer( CBaseEntity *pEntity )
  			pPlayer->GiveNamedItem( STRING( m_weaponNames[i] ) );
 		}
 	}
+
+	// retail stores it in the player and sends SelectItem to the client; the
+	// server-side selection has the same effect
+	if( m_iszDefaultWeapon )
+		pPlayer->SelectItem( STRING( m_iszDefaultWeapon ));
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: equip %s -> player %d, default weapon %s\n", STRING( pev->targetname ),
+			pPlayer->entindex(), m_iszDefaultWeapon ? STRING( m_iszDefaultWeapon ) : "-" );
 }
 
 void CGamePlayerEquip::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
