@@ -37,6 +37,7 @@
 #include "pm_shared.h"
 #include "hltv.h"
 #include "nf_triggers.h"
+#include "nf_env.h"
 
 // #define DUCKFIX
 
@@ -191,6 +192,7 @@ int gmsgNFHudMsg = 0;
 int gmsgNFPlayMovie = 0;
 int gmsgNFObjective = 0;
 int gmsgNFSetHudIcon = 0;
+int gmsgNFFog = 0;
 
 void LinkUserMessages( void )
 {
@@ -249,6 +251,9 @@ void LinkUserMessages( void )
 
 	// Nightfire HUD use icon (trigger_changelevelicon): 0 off, 2 level change
 	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
+
+	// Nightfire env_fog: on, r, g, b, start, end; the same for water
+	gmsgNFFog = REG_USER_MSG( "Fog", 24 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )
@@ -4055,6 +4060,9 @@ void CBasePlayer::UpdateClientData( void )
 		MESSAGE_BEGIN( MSG_ONE, gmsgGeigerRange, NULL, pev );
 			WRITE_BYTE( 0 );
 		MESSAGE_END();
+
+		// Nightfire: the map fog (also switches the previous map's fog off)
+		NF_FogUpdateClient( this );
 
 		InitStatusBar();
 	}

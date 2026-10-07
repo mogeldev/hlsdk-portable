@@ -114,6 +114,7 @@ set (SVDLL_SOURCES
 	nf_materials.cpp
 	nf_debug.cpp
 	nf_triggers.cpp
+	nf_env.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp

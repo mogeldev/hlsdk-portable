@@ -16,6 +16,7 @@
 #include "entity_state.h"
 #include "cl_entity.h"
 #include "triangleapi.h"
+#include "nf_fog.h"
 
 extern "C"
 {
@@ -96,6 +97,9 @@ Non-transparent triangles-- add them here
 void DLLEXPORT HUD_DrawNormalTriangles( void )
 {
 	gHUD.m_Spectator.DrawOverview();
+
+	// Nightfire env_fog (the GL fog state stays set for the next frame's world)
+	NF_FogRender();
 #if TEST_IT
 //	Draw_Triangles();
 #endif
