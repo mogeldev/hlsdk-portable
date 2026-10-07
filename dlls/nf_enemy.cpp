@@ -40,6 +40,25 @@ are chosen by the enemy's state). The enemy walks to the nearest (by route lengt
 the group of the node it stands on, skipping the node it is on, the previous
 one and the last 10 visited, within the patrol distances.
 
+AI events (info_aievent, dlls/nf_aievent.cpp; retail GetSchedule 0x420634B0,
+FindClosestAIEvent 0x4203BAB0, docs/retail/aievent.md): an alerted enemy that
+hears something, or one that gets a new enemy, runs to the nearest free alarm
+event (type 4), faces it (spawnflag 512) and plays its sequence; the
+alarm_trigger sequence fires "alarmbutton" by its animation event 1003. A
+named alarm event that is triggered sends one enemy within its radius.
+An armed enemy with a new enemy and no alarm nearby takes the nearest free
+cover event (type 5) that faces the player and is hidden from him, plays its
+sequence there and stays in cover (retail GetCustomSchedule 0x42065730,
+HandleCustomActivity 0x4205F170), by the sequence name:
+  crouching_wait   crouch, stand up for 3 shots (standing_mgun), crouch again
+  l/r_corner_idle  step out of the corner, 1..ammo/3 shots, step back
+  vent_peek        (type 6, sent by the event when it sees the player) vent_shoot
+It leaves cover (combat as usual) when the enemy sees it there or comes
+within a quarter of the sight distance (crouch / vent: at most 128).
+[not yet] corner grenade / roll-out, vent grenade, corner deaths.
+  excludeaievents  bit mask, 1 << (eventtype - 1): event types never used
+  initeventid      event type bound at spawn [not yet]
+
 Damage and health come from the retail skill.cfg (sk_enemy_*, sk_<weapon>_*),
 whose cvars are registered by NF_RegisterSkillCvars().
 */
@@ -57,6 +76,7 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "hgrunt.h"
 #include "nodes.h"
 #include "nf_debug.h"
+#include "nf_aievent.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
 #define NF_ENEMY_SPAWNFLAGS_HL	0x3FF
@@ -67,12 +87,33 @@ whose cvars are registered by NF_RegisterSkillCvars().
 enum
 {
 	SCHED_NF_PATROL = LAST_COMMON_SCHEDULE + 100,
+	SCHED_NF_AIEVENT_PLAY,		// retail 51 "Grunt Goto AIEvent Play"
+	SCHED_NF_COVER_WAIT,		// retail 79 / 80 / 86 "Wall / Duck / Duct Wait"
+	SCHED_NF_DUCK_ATTACK,		// retail 78 "Duck Attack"
+	SCHED_NF_WALL_ATTACK,		// retail 74 "Wall Attack"
+	SCHED_NF_DUCT_ATTACK,		// retail 87 "Duct Attack"
+};
+
+// cover style at a type 5/6 event, by its sequence (retail SetCustomEvent 0x4205F090)
+enum
+{
+	NF_COVER_NONE = 0,
+	NF_COVER_LCORNER = 3,
+	NF_COVER_CROUCH = 4,
+	NF_COVER_RCORNER = 5,
+	NF_COVER_VENT = 6,
 };
 
 enum
 {
 	TASK_NF_PATROL_MOVE = LAST_COMMON_TASK + 100,	// pick the next patrol node, start moving
 	TASK_NF_PATROL_WAIT,				// stand waitpatroltime at the node
+	TASK_NF_AIEVENT_PATH,				// retail 100: route to the event
+	TASK_NF_AIEVENT_ARRIVE,				// retail 102/104: fire usetarget, pick the yaw
+	TASK_NF_AIEVENT_PLAY,				// retail 103: play m_iszPlay, then the event's SequenceDone
+	TASK_NF_COVER_STAND,				// retail 130: stand up from the crouch
+	TASK_NF_COVER_CROUCH,				// retail 131: crouch again
+	TASK_NF_CORNER_FIRE,				// retail 134: step out, fire, step back
 };
 
 //=========================================================
@@ -184,6 +225,17 @@ private:
 	int CountVoice( const char *kind );
 	BOOL StartPatrolMove( void );
 	BOOL InPatrolHistory( int node );
+public:
+	CAIEvent *FindClosestAIEvent( int iType, BOOL fSkipLOS, BOOL fNeedFacing );
+	BOOL ActivateAIEvent( CAIEvent *pEvent );
+	void ReleaseAIEvent( BOOL fSkip );
+	CAIEvent *AIEvent( void ) { return (CAIEvent *)(CBaseEntity *)m_hAIEvent; }
+	BOOL SetCoverEvent( CAIEvent *pEvent );
+private:
+	Schedule_t *GetCoverSchedule( void );
+	Schedule_t *LeaveCover( void );
+	const char *CoverSequence( Activity act );
+	BOOL InCover( void ) { return m_fAIEventDone && m_iCoverID != NF_COVER_NONE && m_hAIEvent != 0; }
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -203,6 +255,19 @@ private:
 	int m_iPatrolTarget;
 	float m_flNextPatrolTime;
 	int m_bitsLastDamage;	// damage type of the latest hit (death animation)
+
+	int m_iNFSpawnflags;		// Spawnflags before the HL mask (0x100000: no alarm search when alerted)
+	int m_dwExcludeAIEvents;	// excludeaievents
+	int m_iInitEventID;		// initeventid
+	EHANDLE m_hAIEvent;		// event walked to / used
+	BOOL m_fAIEventDone;		// its sequence is done (retail memory 0x4000)
+	BOOL m_fAIEventSkip;		// no more event searches (retail +0x374)
+	int m_iCoverID;			// NF_COVER_* of the event (retail m_iCustomEventID)
+	BOOL m_fCoverStand;		// standing up from the crouch (retail memory 0x800)
+	int m_iFirePhase;		// corner fire: 0 none, 1 step, 2 fire, 3 return
+	int m_cCornerShots;
+	float m_flNextCoverFire;	// retail m_flNextRangeAttack
+	int m_iCoverIdleSeq;		// cover idle sequence playing (not saved)
 };
 
 TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
@@ -223,6 +288,17 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_iPatrolTarget, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_flNextPatrolTime, FIELD_TIME ),
 	DEFINE_FIELD( CNightfireEnemy, m_bitsLastDamage, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_iNFSpawnflags, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_dwExcludeAIEvents, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_iInitEventID, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_hAIEvent, FIELD_EHANDLE ),
+	DEFINE_FIELD( CNightfireEnemy, m_fAIEventDone, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_fAIEventSkip, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_iCoverID, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_fCoverStand, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_iFirePhase, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_cCornerShots, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_flNextCoverFire, FIELD_TIME ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -284,6 +360,16 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	else if( FStrEq( pkvd->szKeyName, "waitpatroltime" ))
 	{
 		m_flWaitPatrolTime = atof( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "excludeaievents" ))
+	{
+		m_dwExcludeAIEvents = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "initeventid" ))
+	{
+		m_iInitEventID = atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
 	else
@@ -405,6 +491,7 @@ void CNightfireEnemy::Spawn( void )
 
 	// "Spawnflags" (capitalised) already landed in pev->spawnflags:
 	// EntvarsKeyvalue compares key names case-insensitively
+	m_iNFSpawnflags = pev->spawnflags;
 	pev->spawnflags &= NF_ENEMY_SPAWNFLAGS_HL;
 
 	pev->solid = SOLID_SLIDEBOX;
@@ -493,6 +580,22 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 	const nf_enemy_weapon_t *w = Weapon();
 	int iSequence;
 
+	// at a cover event: its own idle / fire sequences
+	const char *pszCover = InCover() ? CoverSequence( NewActivity ) : NULL;
+	if( pszCover && LookupSequence( pszCover ) > ACTIVITY_NOT_AVAILABLE )
+	{
+		iSequence = LookupSequence( pszCover );
+		if( NewActivity == ACT_IDLE )
+			m_iCoverIdleSeq = iSequence;
+		m_Activity = NewActivity;
+		if( pev->sequence != iSequence || !m_fSequenceLoops )
+			pev->frame = 0;
+		pev->sequence = iSequence;
+		ResetSequenceInfo();
+		SetYawSpeed();
+		return;
+	}
+
 	// Activities the grunt AI asks for that the Nightfire models lack or
 	// number differently. Without a sequence the monster falls back to
 	// sequence 0 (idle1, 4.3 s) and a TASK_PLAY_SEQUENCE waits for it.
@@ -507,6 +610,7 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 	case ACT_SIGNAL1:
 	case ACT_SIGNAL2:
 	case ACT_SIGNAL3:
+	case ACT_COMBAT_IDLE:	// cover: stand up from the crouch
 	case ACT_VICTORY_DANCE:
 	case ACT_SPECIAL_ATTACK1:
 		// no hand-signal sequences in the models; a 2-frame combat pose
@@ -603,6 +707,7 @@ void CNightfireEnemy::NFShoot( void )
 
 	pev->effects |= EF_MUZZLEFLASH;
 	m_cAmmoLoaded--;
+	m_flNextCoverFire = gpGlobals->time + 0.5f;	// [assumed] retail m_flNextRangeAttack
 
 	Vector angDir = UTIL_VecToAngles( vecShootDir );
 	SetBlending( 0, angDir.x );
@@ -682,6 +787,11 @@ void CNightfireEnemy::HandleAnimEvent( MonsterEvent_t *pEvent )
 
 void CNightfireEnemy::PrescheduleThink( void )
 {
+	// MonsterThink replaces a finished ACT_IDLE sequence by the model's idle
+	// (LookupActivity): pick the cover idle again
+	if( InCover() && m_Activity == ACT_IDLE && pev->sequence != m_iCoverIdleSeq )
+		SetActivity( ACT_IDLE );
+
 	if( HasConditions( bits_COND_NEW_ENEMY ) && gpGlobals->time > m_flNextCombatTalk )
 	{
 		PlayVoice( "combat", m_cCombat, ATTN_NORM );
@@ -747,6 +857,11 @@ void CNightfireEnemy::TraceAttack( entvars_t *pevAttacker, float flDamage, Vecto
 
 void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 {
+	// [assumed] an event not reached yet is free again (retail releases
+	// only events whose sequence is done, in HandleCustomActivity)
+	if( !m_fAIEventDone || m_iCoverID != NF_COVER_NONE )
+		ReleaseAIEvent( FALSE );
+
 	if( NF_DEBUG( NF_DBG_MONSTERS ))
 		ALERT( at_console, "nf_debug: enemy '%s' killed%s at %.0f %.0f %.0f (gib %d)\n", STRING( pev->targetname ),
 			HasMemory( bits_MEMORY_KILLED ) ? " again (corpse hit)" : "", pev->origin.x, pev->origin.y, pev->origin.z, iGib );
@@ -788,9 +903,94 @@ Schedule_t slNFPatrol[] =
 	},
 };
 
+//=========================================================
+// AI events
+//=========================================================
+Task_t tlNFAIEventPlay[] =
+{
+	{ TASK_NF_AIEVENT_PATH, (float)0 },
+	{ TASK_WAIT_FOR_MOVEMENT, (float)0 },
+	{ TASK_NF_AIEVENT_ARRIVE, (float)0 },
+	{ TASK_FACE_IDEAL, (float)0 },
+	{ TASK_NF_AIEVENT_PLAY, (float)0 },
+};
+
+Schedule_t slNFAIEventPlay[] =
+{
+	{
+		tlNFAIEventPlay,
+		ARRAYSIZE( tlNFAIEventPlay ),
+		bits_COND_HEAVY_DAMAGE,		// retail interrupt mask 0x200
+		0,
+		"NFAIEventPlay"
+	},
+};
+
+// retail interrupt mask 0x10130201 without SPECIAL1 ("cannot fire now")
+#define NF_COVER_INTERRUPTS ( bits_COND_NO_AMMO_LOADED | bits_COND_HEAVY_DAMAGE | bits_COND_NEW_ENEMY | bits_COND_HEAR_SOUND | bits_COND_ENEMY_DEAD )
+
+// retail 79 / 80 / 86: idle in cover for a moment (the wait: 2 s, vent 0.75 s, random)
+Task_t tlNFCoverWait[] =
+{
+	{ TASK_SET_ACTIVITY, (float)ACT_IDLE },
+	{ TASK_WAIT_RANDOM, (float)2 },
+};
+
+Schedule_t slNFCoverWait[] =
+{
+	{ tlNFCoverWait, ARRAYSIZE( tlNFCoverWait ), NF_COVER_INTERRUPTS, bits_SOUND_DANGER, "NFCoverWait" },
+};
+
+// retail 78: stand up 0.3 s, three shots standing, crouch, wait
+Task_t tlNFDuckAttack[] =
+{
+	{ TASK_FACE_ENEMY, (float)0 },
+	{ TASK_NF_COVER_STAND, (float)0.3 },
+	{ TASK_RANGE_ATTACK1, (float)0 },
+	{ TASK_RANGE_ATTACK1, (float)0 },
+	{ TASK_RANGE_ATTACK1, (float)0 },
+	{ TASK_NF_COVER_CROUCH, (float)0 },
+	{ TASK_SET_ACTIVITY, (float)ACT_IDLE },
+	{ TASK_WAIT_RANDOM, (float)3 },
+};
+
+Schedule_t slNFDuckAttack[] =
+{
+	{ tlNFDuckAttack, ARRAYSIZE( tlNFDuckAttack ), NF_COVER_INTERRUPTS, bits_SOUND_DANGER, "NFDuckAttack" },
+};
+
+// retail 74: corner fire (step, 1..ammo/3 shots, return), wait
+Task_t tlNFWallAttack[] =
+{
+	{ TASK_NF_CORNER_FIRE, (float)0 },
+	{ TASK_SET_ACTIVITY, (float)ACT_IDLE },
+	{ TASK_WAIT_RANDOM, (float)3 },
+};
+
+Schedule_t slNFWallAttack[] =
+{
+	{ tlNFWallAttack, ARRAYSIZE( tlNFWallAttack ), NF_COVER_INTERRUPTS, bits_SOUND_DANGER, "NFWallAttack" },
+};
+
+// retail 87: one vent_shoot
+Task_t tlNFDuctAttack[] =
+{
+	{ TASK_RANGE_ATTACK1, (float)0 },
+};
+
+Schedule_t slNFDuctAttack[] =
+{
+	{ tlNFDuctAttack, ARRAYSIZE( tlNFDuctAttack ), NF_COVER_INTERRUPTS, bits_SOUND_DANGER, "NFDuctAttack" },
+};
+
 DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 {
 	slNFPatrol,
+	slNFAIEventPlay,
+	slNFCoverWait,
+	slNFDuckAttack,
+	slNFWallAttack,
+	slNFDuctAttack,
 };
 
 IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
@@ -903,8 +1103,316 @@ BOOL CNightfireEnemy::StartPatrolMove( void )
 	return FALSE;
 }
 
+// retail CBaseCharacter::FindClosestAIEvent 0x4203BAB0: the nearest free
+// event of the type within min(512, sight distance) and within its own
+// radius; fNeedFacing: the player is in the event's view cone; !fSkipLOS:
+// the event is hidden from the player. probability, anglerange and the
+// cooldown are not checked.
+CAIEvent *CNightfireEnemy::FindClosestAIEvent( int iType, BOOL fSkipLOS, BOOL fNeedFacing )
+{
+	if( iType < 1 || ( m_dwExcludeAIEvents & ( 1 << ( iType - 1 ))))
+		return NULL;
+
+	CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
+	CAIEvent *pBest = NULL;
+	float flBest = 9999.99f;
+	CBaseEntity *pEntity = NULL;
+
+	while(( pEntity = UTIL_FindEntityInSphere( pEntity, pev->origin, Q_min( 512.0f, m_flDistLook ))) != NULL )
+	{
+		if( !FClassnameIs( pEntity->pev, "info_aievent" ))
+			continue;
+		CAIEvent *pEvent = (CAIEvent *)pEntity;
+		if( FBitSet( pEvent->pev->spawnflags, SF_NF_AIEVENT_NOT_ENEMIES ))
+			continue;
+
+		if( pPlayer )
+		{
+			if( fNeedFacing && !pEvent->InViewCone( pPlayer->pev->origin ))
+				continue;
+			if( !fSkipLOS )
+			{
+				TraceResult tr;
+				UTIL_TraceLine( pEvent->pev->origin, pPlayer->pev->origin, ignore_monsters, pEvent->edict(), &tr );
+				if( tr.flFraction == 1.0f )
+					continue;
+			}
+		}
+
+		if( pEvent->m_fLocked || pEvent->m_iEventType != iType )
+			continue;
+
+		float flDist = ( pEvent->pev->origin - pev->origin ).Length();
+		if( pEvent->m_flRadius > 0 && flDist > pEvent->m_flRadius )
+			continue;
+		if( flDist < flBest )
+		{
+			flBest = flDist;
+			pBest = pEvent;
+		}
+	}
+	return pBest;
+}
+
+// lock the event and go there (retail: schedule 51)
+BOOL CNightfireEnemy::ActivateAIEvent( CAIEvent *pEvent )
+{
+	if( !pEvent || !IsAlive() || m_hAIEvent != 0 || m_MonsterState == MONSTERSTATE_SCRIPT )
+		return FALSE;
+
+	pEvent->m_fLocked = TRUE;
+	pEvent->m_iCounter = 0;
+	m_hAIEvent = pEvent;
+	m_fAIEventDone = FALSE;
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' goes to aievent type %d '%s' at %.0f %.0f %.0f (%.0f away)\n", STRING( pev->targetname ),
+			pEvent->m_iEventType, STRING( pEvent->m_iszPlay ), pEvent->pev->origin.x, pEvent->pev->origin.y, pEvent->pev->origin.z,
+			( pEvent->pev->origin - pev->origin ).Length());
+	ChangeSchedule( GetScheduleOfType( SCHED_NF_AIEVENT_PLAY ));
+	return TRUE;
+}
+
+// retail task 107: unlock the event; fSkip: no more event searches
+void CNightfireEnemy::ReleaseAIEvent( BOOL fSkip )
+{
+	CAIEvent *pEvent = AIEvent();
+	if( pEvent )
+	{
+		pEvent->m_fLocked = FALSE;
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' releases aievent type %d '%s'\n", STRING( pev->targetname ),
+				pEvent->m_iEventType, STRING( pEvent->m_iszPlay ));
+	}
+	m_hAIEvent = NULL;
+	m_fAIEventDone = FALSE;
+	m_iCoverID = NF_COVER_NONE;
+	m_fCoverStand = FALSE;
+	m_iFirePhase = 0;
+	if( fSkip )
+		m_fAIEventSkip = TRUE;
+}
+
+// retail CGenericEnemy::SetCustomEvent 0x4205F090: types 5 / 6, the style by
+// the sequence name ([assumed] by prefix: the maps also use l_corner_idle1 /
+// r_corner_idle1)
+BOOL CNightfireEnemy::SetCoverEvent( CAIEvent *pEvent )
+{
+	if( pEvent->m_iEventType != NF_AIEVENT_COVER && pEvent->m_iEventType != NF_AIEVENT_VENT )
+		return FALSE;
+
+	const char *pszPlay = STRING( pEvent->m_iszPlay );
+	if( !strncmp( pszPlay, "l_corner_idle", 13 ))
+		m_iCoverID = NF_COVER_LCORNER;
+	else if( !strncmp( pszPlay, "crouching_wait", 14 ))
+		m_iCoverID = NF_COVER_CROUCH;
+	else if( !strncmp( pszPlay, "r_corner_idle", 13 ))
+		m_iCoverID = NF_COVER_RCORNER;
+	else if( !strncmp( pszPlay, "vent_peek", 9 ))
+		m_iCoverID = NF_COVER_VENT;
+	else
+		m_iCoverID = NF_COVER_NONE;
+	return TRUE;
+}
+
+// retail HandleCustomActivity 0x4205F170
+const char *CNightfireEnemy::CoverSequence( Activity act )
+{
+	const nf_enemy_weapon_t *w = Weapon();
+	const char *pszStanding = w && w->sniper ? "standing_sniper" : "standing_mgun";
+	BOOL fLeft = m_iCoverID == NF_COVER_LCORNER;
+
+	switch( act )
+	{
+	case ACT_IDLE:
+	case ACT_IDLE_ANGRY:	// retail 1 and 47
+		switch( m_iCoverID )
+		{
+		case NF_COVER_CROUCH:
+			m_fCoverStand = FALSE;
+			return RANDOM_LONG( 0, 4 ) ? "crouching_wait" : "crouching_wait2";
+		case NF_COVER_LCORNER: return "l_corner_idle";
+		case NF_COVER_RCORNER: return "r_corner_idle";
+		case NF_COVER_VENT: return "vent_idle";
+		}
+		break;
+	case ACT_RANGE_ATTACK1:
+		switch( m_iCoverID )
+		{
+		case NF_COVER_CROUCH:
+			m_fCoverStand = TRUE;
+			return pszStanding;
+		case NF_COVER_LCORNER:
+		case NF_COVER_RCORNER:
+			switch( m_iFirePhase )
+			{
+			case 1: return fLeft ? "l_corner_fire_step" : "r_corner_fire_step";
+			case 2: return fLeft ? "l_corner_fire" : "r_corner_fire";
+			case 3: return fLeft ? "l_corner_fire_return" : "r_corner_fire_return";
+			}
+			return w && w->sniper ? pszStanding : fLeft ? "l_corner_fire" : "r_corner_fire";
+		case NF_COVER_VENT: return w && w->sniper ? pszStanding : "vent_shoot";
+		}
+		break;
+	case ACT_RANGE_ATTACK2:
+		switch( m_iCoverID )
+		{
+		case NF_COVER_CROUCH: return pszStanding;
+		case NF_COVER_LCORNER: return "l_corner_grenade_throw";
+		case NF_COVER_RCORNER: return "r_corner_grenade_throw";
+		case NF_COVER_VENT: return "vent_grenade";
+		}
+		break;
+	default:
+		break;
+	}
+	return NULL;
+}
+
+// retail release: free the event, combat, Combat Face; a later new enemy may
+// search again
+Schedule_t *CNightfireEnemy::LeaveCover( void )
+{
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' leaves cover %d\n", STRING( pev->targetname ), m_iCoverID );
+	ReleaseAIEvent( FALSE );
+	m_fAIEventSkip = FALSE;
+	if( UTIL_PlayerByIndex( 1 ) == NULL )
+	{
+		SetState( MONSTERSTATE_IDLE );
+		return CHGrunt::GetScheduleOfType( SCHED_IDLE_STAND );
+	}
+	m_MonsterState = m_IdealMonsterState = MONSTERSTATE_COMBAT;
+	return CHGrunt::GetScheduleOfType( SCHED_COMBAT_FACE );
+}
+
+// retail CGenericEnemy::GetCustomSchedule 0x42065730 (ids 3/4/5/6)
+Schedule_t *CNightfireEnemy::GetCoverSchedule( void )
+{
+	CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
+	if( !pPlayer )
+		return LeaveCover();
+
+	float flTooClose = m_flDistLook / 4;
+	if( m_iCoverID == NF_COVER_CROUCH || m_iCoverID == NF_COVER_VENT )
+		flTooClose = Q_min( flTooClose, 128.0f );
+
+	if( m_hEnemy == 0 )
+	{
+		// peek: crouch from the standing eye, corner 32 units to the side, vent 24 up
+		Vector vecPeek = pev->origin;
+		if( m_iCoverID == NF_COVER_CROUCH )
+			vecPeek = vecPeek + Vector( 0, 0, 64 );
+		else if( m_iCoverID == NF_COVER_VENT )
+			vecPeek = vecPeek + Vector( 0, 0, 24 );
+		else
+		{
+			UTIL_MakeVectors( pev->angles );
+			vecPeek = vecPeek + pev->view_ofs + gpGlobals->v_right * ( m_iCoverID == NF_COVER_LCORNER ? 32 : -32 );
+		}
+		TraceResult tr;
+		UTIL_TraceLine( vecPeek, pPlayer->EyePosition(), ignore_monsters, ENT( pev ), &tr );
+		if( tr.flFraction < 1.0f )
+			return slNFCoverWait;
+
+		m_hEnemy = pPlayer;
+		m_vecEnemyLKP = pPlayer->pev->origin;
+		if(( pPlayer->pev->origin - pev->origin ).Length() < flTooClose )
+			return LeaveCover();
+	}
+
+	if( HasConditions( bits_COND_NO_AMMO_LOADED ))
+		return CHGrunt::GetScheduleOfType( SCHED_RELOAD );
+
+	// cover is useless when the enemy sees him (crouch: at crouched height) or is close
+	CBaseEntity *pEnemy = m_hEnemy;
+	BOOL fVisible;
+	if( m_iCoverID == NF_COVER_CROUCH )
+	{
+		TraceResult tr;
+		UTIL_TraceLine( pev->origin + Vector( 0, 0, 36 ), pEnemy->EyePosition(), ignore_monsters, ENT( pev ), &tr );
+		fVisible = tr.flFraction == 1.0f || tr.pHit == pEnemy->edict();
+	}
+	else
+		fVisible = FVisible( pEnemy );
+	if( fVisible || ( pEnemy->pev->origin - pev->origin ).Length() < flTooClose )
+		return LeaveCover();
+
+	if( gpGlobals->time < m_flNextCoverFire )
+		return slNFCoverWait;
+	switch( m_iCoverID )
+	{
+	case NF_COVER_CROUCH:
+		return slNFDuckAttack;
+	case NF_COVER_VENT:
+		return slNFDuctAttack;
+	default:
+		m_iFirePhase = 0;
+		return m_cAmmoLoaded < 6 ? CHGrunt::GetScheduleOfType( SCHED_RELOAD ) : slNFWallAttack;
+	}
+}
+
+// retail CBaseCharacter::ActivateAIEvent 0x42037C50 (vtable +0xF8): only
+// alarms; the enemy override adds type 6 [not yet]
+BOOL NF_EnemyActivateAIEvent( CBaseEntity *pEntity, CAIEvent *pEvent, CBaseEntity *pActivator )
+{
+	if( !FClassnameIs( pEntity->pev, "enemy_generic" ))
+		return FALSE;
+	CNightfireEnemy *pEnemy = (CNightfireEnemy *)pEntity;
+	if( pEvent->m_iEventType == NF_AIEVENT_ALARM )
+		return pEnemy->ActivateAIEvent( pEvent );
+
+	// retail CGenericEnemy 0x42064DF0: a vent for an enemy that already has
+	// an enemy [details assumed]
+	if( pEvent->m_iEventType == NF_AIEVENT_VENT && pEnemy->m_hEnemy != 0 && !pEnemy->AIEvent() &&
+		pEnemy->SetCoverEvent( pEvent ) && pEnemy->ActivateAIEvent( pEvent ))
+		return TRUE;
+	return FALSE;
+}
+
 Schedule_t *CNightfireEnemy::GetSchedule( void )
 {
+	if( IsAlive() && InCover())
+	{
+		Schedule_t *pCover = GetCoverSchedule();
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' cover %d: %s (ammo %d)\n", STRING( pev->targetname ), m_iCoverID,
+				pCover ? pCover->pName : "-", m_cAmmoLoaded );
+		return pCover;
+	}
+
+	if( m_hAIEvent != 0 && !m_fAIEventDone )
+	{
+		// a state change (e.g. alert -> combat) on the way: keep going
+		if( m_pSchedule == slNFAIEventPlay && !HasConditions( bits_COND_HEAVY_DAMAGE | bits_COND_TASK_FAILED ))
+			return m_pSchedule;
+		// interrupted before the sequence ended (heavy damage): free the
+		// event and fight [assumed]
+		ReleaseAIEvent( TRUE );
+	}
+
+	// retail GetSchedule 0x420634B0: alerted by a sound, or a new enemy in
+	// combat: run to the nearest alarm (cover events: [not yet])
+	if( IsAlive() && m_hAIEvent == 0 && !m_fAIEventSkip &&
+		(( m_MonsterState == MONSTERSTATE_ALERT && HasConditions( bits_COND_HEAR_SOUND ) && !( m_iNFSpawnflags & 0x100000 )) ||
+		( m_MonsterState == MONSTERSTATE_COMBAT && HasConditions( bits_COND_NEW_ENEMY ))))
+	{
+		CAIEvent *pEvent = FindClosestAIEvent( NF_AIEVENT_ALARM, TRUE, FALSE );
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' (state %d) looks for an alarm within %.0f at %.0f %.0f %.0f: %s\n", STRING( pev->targetname ),
+				m_MonsterState, Q_min( 512.0f, m_flDistLook ), pev->origin.x, pev->origin.y, pev->origin.z, pEvent ? "found" : "none" );
+		if( pEvent && ActivateAIEvent( pEvent ))
+			return m_pSchedule;
+
+		// an armed enemy with a new enemy: cover facing the player, hidden from him
+		if( m_MonsterState == MONSTERSTATE_COMBAT && Weapon())
+		{
+			pEvent = FindClosestAIEvent( NF_AIEVENT_COVER, FALSE, TRUE );
+			if( pEvent && SetCoverEvent( pEvent ) && ActivateAIEvent( pEvent ))
+				return m_pSchedule;
+			m_iCoverID = NF_COVER_NONE;
+		}
+	}
+
 	if(( m_MonsterState == MONSTERSTATE_IDLE || m_MonsterState == MONSTERSTATE_ALERT ) &&
 		m_flMaxPatrolDist > 0 && gpGlobals->time >= m_flNextPatrolTime &&
 		!HasConditions( bits_COND_NEW_ENEMY | bits_COND_SEE_ENEMY | bits_COND_SEE_FEAR |
@@ -919,6 +1427,21 @@ Schedule_t *CNightfireEnemy::GetScheduleOfType( int Type )
 {
 	if( Type == SCHED_NF_PATROL )
 		return slNFPatrol;
+	if( Type == SCHED_NF_AIEVENT_PLAY )
+		return slNFAIEventPlay;
+
+	// a cover schedule failed (e.g. no line of fire): leave cover
+	if( Type == SCHED_FAIL && InCover())
+		return LeaveCover();
+
+	// retail 56 "GotoAIEventFailed": release the event, search no more
+	if( Type == SCHED_FAIL && m_pSchedule == slNFAIEventPlay )
+	{
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' failed aievent task %d (%.0f away)\n", STRING( pev->targetname ),
+				m_iScheduleIndex, AIEvent() ? ( AIEvent()->pev->origin - pev->origin ).Length2D() : 0.0f );
+		ReleaseAIEvent( TRUE );
+	}
 
 	// a patrol route that fails on the way (blocked): stand a moment and
 	// try again instead of the grunt's fail schedule (TASK_WAIT_PVS)
@@ -964,6 +1487,79 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 		m_IdealActivity = m_MonsterState == MONSTERSTATE_ALERT ? ACT_IDLE_ANGRY : ACT_IDLE;
 		m_flWaitFinished = gpGlobals->time + m_flWaitPatrolTime;
 		break;
+	case TASK_NF_AIEVENT_PATH:
+	{
+		CAIEvent *pEvent = AIEvent();
+		if( !pEvent )
+		{
+			TaskFail();
+			break;
+		}
+		if(( pEvent->pev->origin - pev->origin ).Length2D() < 16 || MoveToLocation( ACT_RUN, 2, pEvent->pev->origin ))
+			TaskComplete();
+		else
+			TaskFail();
+		break;
+	}
+	case TASK_NF_AIEVENT_ARRIVE:
+	{
+		CAIEvent *pEvent = AIEvent();
+		if( !pEvent )
+		{
+			TaskFail();
+			break;
+		}
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' at aievent type %d (%.0f away)\n", STRING( pev->targetname ),
+				pEvent->m_iEventType, ( pEvent->pev->origin - pev->origin ).Length2D());
+		// retail IsAtAIEvent 0x420375D0: types 3/4 use the usetarget entity
+		if(( pEvent->m_iEventType == NF_AIEVENT_BOSS || pEvent->m_iEventType == NF_AIEVENT_ALARM ) && !FStringNull( pEvent->m_iszUseTarget ))
+		{
+			CBaseEntity *pTarget = UTIL_FindEntityByTargetname( NULL, STRING( pEvent->m_iszUseTarget ));
+			if( pTarget )
+				pTarget->Use( this, this, USE_ON, 0 );
+		}
+		pev->ideal_yaw = FBitSet( pEvent->pev->spawnflags, SF_NF_AIEVENT_FACE ) ? pEvent->pev->angles.y : pev->angles.y;
+		TaskComplete();
+		break;
+	}
+	case TASK_NF_COVER_STAND:
+		m_fCoverStand = TRUE;
+		m_IdealActivity = ACT_COMBAT_IDLE;	// retail 62, not remapped: stand up
+		m_flWaitFinished = gpGlobals->time + pTask->flData;
+		break;
+	case TASK_NF_COVER_CROUCH:
+		m_fCoverStand = FALSE;
+		m_IdealActivity = ACT_IDLE;
+		TaskComplete();
+		break;
+	case TASK_NF_CORNER_FIRE:
+		m_iFirePhase = 1;
+		m_IdealActivity = ACT_RANGE_ATTACK1;
+		SetActivity( ACT_RANGE_ATTACK1 );
+		break;
+	case TASK_NF_AIEVENT_PLAY:
+	{
+		CAIEvent *pEvent = AIEvent();
+		int iSequence = pEvent ? LookupSequence( STRING( pEvent->m_iszPlay )) : ACTIVITY_NOT_AVAILABLE;
+		if( iSequence <= ACTIVITY_NOT_AVAILABLE )
+		{
+			if( pEvent )
+			{
+				ALERT( at_aiconsole, "enemy '%s' (%s) has no sequence '%s'\n", STRING( pev->targetname ), STRING( pev->model ), STRING( pEvent->m_iszPlay ));
+				m_fAIEventDone = TRUE;
+				pEvent->SequenceDone( this );
+			}
+			TaskComplete();
+			break;
+		}
+		// a sequence without an activity: MaintainSchedule must not replace it
+		m_IdealActivity = m_Activity = ACT_RESET;
+		pev->sequence = iSequence;
+		pev->frame = 0;
+		ResetSequenceInfo();
+		break;
+	}
 	default:
 		CHGrunt::StartTask( pTask );
 		break;
@@ -978,6 +1574,57 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 		if( gpGlobals->time >= m_flWaitFinished )
 			TaskComplete();
 		break;
+	case TASK_NF_COVER_STAND:
+		if( gpGlobals->time >= m_flWaitFinished )
+			TaskComplete();
+		break;
+	case TASK_NF_CORNER_FIRE:
+		// retail 134: the next phase when a sequence ends; the shots come from
+		// the fire sequence's animation events
+		if( !m_fSequenceFinished )
+			break;
+		if( m_iFirePhase == 1 )
+		{
+			m_cCornerShots = RANDOM_LONG( 1, Q_max( 1, m_cAmmoLoaded / 3 ));
+			m_iFirePhase = 2;
+		}
+		else if( m_iFirePhase == 2 )
+		{
+			if( --m_cCornerShots <= 0 || m_cAmmoLoaded <= 0 )
+				m_iFirePhase = 3;
+		}
+		else
+		{
+			m_iFirePhase = 0;
+			TaskComplete();
+			break;
+		}
+		SetActivity( ACT_RANGE_ATTACK1 );
+		break;
+	case TASK_NF_AIEVENT_PLAY:
+	{
+		CAIEvent *pEvent = AIEvent();
+		if( !pEvent )
+		{
+			TaskFail();
+			break;
+		}
+		if( !m_fSequenceFinished )
+			break;
+		// retail CAIEvent::SequenceDone 0x42014A70: type 2 repeats animcount times
+		if( pEvent->m_iEventType == NF_AIEVENT_REPEAT && ++pEvent->m_iCounter < pEvent->m_iAnimCount )
+		{
+			pev->frame = 0;
+			ResetSequenceInfo();
+			break;
+		}
+		m_fAIEventDone = TRUE;
+		pEvent->SequenceDone( this );
+		if( NF_DEBUG( NF_DBG_MONSTERS ) && m_iCoverID != NF_COVER_NONE )
+			ALERT( at_console, "nf_debug: enemy '%s' in cover %d\n", STRING( pev->targetname ), m_iCoverID );
+		TaskComplete();
+		break;
+	}
 	default:
 		CHGrunt::RunTask( pTask );
 		break;
