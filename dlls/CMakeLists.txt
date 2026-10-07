@@ -110,6 +110,7 @@ set (SVDLL_SOURCES
 	nf_items.cpp
 	nf_pp9.cpp
 	nf_guns.cpp
+	nf_materials.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp

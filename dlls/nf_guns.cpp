@@ -263,8 +263,7 @@ static void NF_FireBuckshot( CBasePlayer *pPlayer, int pellets, Vector vecSrc, V
 
 			if( pEntity )
 				pEntity->TraceAttack( pPlayer->pev, flDamage, vecDir.Normalize(), &tr, DMG_BULLET | DMG_NEVERGIB );
-			TEXTURETYPE_PlaySound( &tr, vecSrc, vecEnd, BULLET_PLAYER_BUCKSHOT );
-			DecalGunshot( &tr, BULLET_PLAYER_BUCKSHOT );
+			// impact sound and decal: the client fire event (EV_FireNFGun)
 		}
 	}
 	ApplyMultiDamage( pPlayer->pev, pPlayer->pev );

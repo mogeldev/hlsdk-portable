@@ -30,6 +30,7 @@
 #include "soundent.h"
 #include "decals.h"
 #include "gamerules.h"
+#include "nf_materials.h"
 
 extern CGraph WorldGraph;
 extern int gEvilImpulse101;
@@ -148,6 +149,47 @@ int DamageDecal( CBaseEntity *pEntity, int bitsDamageType )
 	return pEntity->DamageDecal( bitsDamageType );
 }
 
+// James Bond 007: Nightfire: the impact decal by the material of the hit
+// texture (sound/debris.txt, nf_materials.cpp). Returns FALSE without a
+// Nightfire material list (Half-Life decals then)
+static BOOL NF_DecalGunshot( TraceResult *pTrace )
+{
+	if( !NF_MaterialsLoaded())
+	{
+		char *buf = (char *)LOAD_FILE_FOR_ME( "sound/debris.txt", NULL );
+		NF_LoadMaterials( buf );
+		if( buf )
+			FREE_FILE( buf );
+	}
+
+	if( !NF_MaterialCount())
+		return FALSE;
+
+	if( pTrace->flFraction == 1.0f )
+		return TRUE;
+
+	Vector vecSrc = pTrace->vecEndPos + pTrace->vecPlaneNormal * 4.0f;
+	Vector vecEnd = pTrace->vecEndPos - pTrace->vecPlaneNormal * 4.0f;
+	const char *tex = TRACE_TEXTURE( pTrace->pHit, vecSrc, vecEnd );
+	const char *decal = NF_ImpactDecal( NF_TextureMaterial( tex ), FClassnameIs( pTrace->pHit, "func_breakable" ), RANDOM_LONG( 1, 4 ));
+	if( !decal )
+		return TRUE;	// N: no effects
+
+	int index = DECAL_INDEX( decal );
+	if( index < 0 )
+		return TRUE;
+
+	MESSAGE_BEGIN( MSG_PAS, SVC_TEMPENTITY, pTrace->vecEndPos );
+		WRITE_BYTE( TE_GUNSHOTDECAL );
+		WRITE_COORD( pTrace->vecEndPos.x );
+		WRITE_COORD( pTrace->vecEndPos.y );
+		WRITE_COORD( pTrace->vecEndPos.z );
+		WRITE_SHORT( (short)ENTINDEX( pTrace->pHit ) );
+		WRITE_BYTE( index );
+	MESSAGE_END();
+	return TRUE;
+}
+
 void DecalGunshot( TraceResult *pTrace, int iBulletType )
 {
 	// Is the entity valid
@@ -157,6 +199,10 @@ void DecalGunshot( TraceResult *pTrace, int iBulletType )
 	if( VARS( pTrace->pHit )->solid == SOLID_BSP || VARS( pTrace->pHit )->movetype == MOVETYPE_PUSHSTEP )
 	{
 		CBaseEntity *pEntity = NULL;
+
+		if( iBulletType != BULLET_PLAYER_CROWBAR && NF_DecalGunshot( pTrace ))
+			return;
+
 		// Decal the wall with a gunshot
 		if( !FNullEnt( pTrace->pHit ) )
 			pEntity = CBaseEntity::Instance( pTrace->pHit );

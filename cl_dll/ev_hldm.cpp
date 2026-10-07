@@ -36,6 +36,7 @@
 #include "r_studioint.h"
 #include "com_model.h"
 #include "nf_gun_info.h"	// James Bond 007: Nightfire
+#include "nf_materials.h"
 
 extern engine_studio_api_t IEngineStudio;
 
@@ -307,6 +308,37 @@ void EV_HLDM_GunshotDecalTrace( pmtrace_t *pTrace, char *decalName )
 	}
 }
 
+// James Bond 007: Nightfire: the impact decal by the material of the hit
+// texture (sound/debris.txt, dlls/nf_materials.cpp); "" = no effects (N),
+// NULL = no Nightfire material list, use the Half-Life decals
+static char *EV_NF_DamageDecal( pmtrace_t *pTrace, physent_t *pe )
+{
+	static char decalname[32];
+	vec3_t src, end;
+	const char *tex, *decal;
+
+	if( !NF_MaterialsLoaded())
+	{
+		char *buf = (char *)gEngfuncs.COM_LoadFile( "sound/debris.txt", 5, NULL );
+		NF_LoadMaterials( buf );
+		if( buf )
+			gEngfuncs.COM_FreeFile( buf );
+	}
+
+	if( !NF_MaterialCount())
+		return NULL;
+
+	VectorMA( pTrace->endpos, 4.0f, pTrace->plane.normal, src );
+	VectorMA( pTrace->endpos, -4.0f, pTrace->plane.normal, end );
+	tex = gEngfuncs.pEventAPI->EV_TraceTexture( pTrace->ent, src, end );
+
+	// retail: glass gets the breakable decal on breakable entities
+	decal = NF_ImpactDecal( NF_TextureMaterial( tex ), pe->classnumber == 1, gEngfuncs.pfnRandomLong( 1, 4 ));
+	strncpy( decalname, decal ? decal : "", sizeof( decalname ) - 1 );
+	decalname[sizeof( decalname ) - 1] = '\0';
+	return decalname;
+}
+
 void EV_HLDM_DecalGunshot( pmtrace_t *pTrace, int iBulletType )
 {
 	physent_t *pe;
@@ -315,6 +347,16 @@ void EV_HLDM_DecalGunshot( pmtrace_t *pTrace, int iBulletType )
 
 	if( pe && ( pe->solid == SOLID_BSP || pe->movetype == MOVETYPE_PUSHSTEP ) )
 	{
+		char *nfdecal = EV_NF_DamageDecal( pTrace, pe );
+
+		if( nfdecal )
+		{
+			// N: no decal, no smoke, no ricochet
+			if( nfdecal[0] )
+				EV_HLDM_GunshotDecalTrace( pTrace, nfdecal );
+			return;
+		}
+
 		switch( iBulletType )
 		{
 		case BULLET_PLAYER_9MM:

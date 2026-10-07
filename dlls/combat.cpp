@@ -1506,9 +1506,10 @@ Vector CBaseEntity::FireBulletsPlayer( ULONG cShots, Vector vecSrc, Vector vecDi
 			{
 				pEntity->TraceAttack( pevAttacker, iDamage, vecDir, &tr, DMG_BULLET | ( ( iDamage > 16 ) ? DMG_ALWAYSGIB : DMG_NEVERGIB ) );
 
-				TEXTURETYPE_PlaySound( &tr, vecSrc, vecEnd, iBulletType );
-				DecalGunshot( &tr, iBulletType );
-			} 
+				// James Bond 007: Nightfire weapons pass their damage; their
+				// client fire event plays the impact sound and decal, as for
+				// the Half-Life weapons below (doing it here doubled them)
+			}
 			else switch( iBulletType )
 			{
 			default:
