@@ -742,6 +742,9 @@ public:
 	void		KeyValue( KeyValueData *pkvd );
 	void		Touch( CBaseEntity *pOther );
 	void		Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+	virtual int	Save( CSave &save );
+	virtual int	Restore( CRestore &restore );
+	static	TYPEDESCRIPTION m_SaveData[];
 
 	inline BOOL	UseOnly( void ) { return (pev->spawnflags & SF_PLAYEREQUIP_USEONLY) ? TRUE : FALSE; }
 
@@ -754,6 +757,17 @@ private:
 };
 
 LINK_ENTITY_TO_CLASS( game_player_equip, CGamePlayerEquip )
+
+// Nightfire: HL kept the equipment list only from the map keyvalues, so an
+// equip fired after a load gave nothing
+TYPEDESCRIPTION	CGamePlayerEquip::m_SaveData[] =
+{
+	DEFINE_ARRAY( CGamePlayerEquip, m_weaponNames, FIELD_STRING, MAX_EQUIP ),
+	DEFINE_ARRAY( CGamePlayerEquip, m_weaponCount, FIELD_INTEGER, MAX_EQUIP ),
+	DEFINE_FIELD( CGamePlayerEquip, m_iszDefaultWeapon, FIELD_STRING ),
+};
+
+IMPLEMENT_SAVERESTORE( CGamePlayerEquip, CRulePointEntity )
 
 void CGamePlayerEquip::KeyValue( KeyValueData *pkvd )
 {

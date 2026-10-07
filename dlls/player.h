@@ -326,6 +326,10 @@ public:
 
 	float m_flNextChatTime;
 
+	// James Bond 007: Nightfire spawn equipment, given after the map's start
+	// triggers (CHalfLifeRules::PlayerSpawn / PlayerThink); saved
+	float m_flNFEquipTime;
+
 	int m_iAutoWepSwitch;
 
 	Vector m_vecLastViewAngles;

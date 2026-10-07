@@ -37,7 +37,6 @@ CHalfLifeRules::CHalfLifeRules( void )
 {
 	SERVER_COMMAND( "exec spserver.cfg\n" );
 	RefreshSkillData();
-	m_flNFEquipTime = 0;
 }
 
 //=========================================================
@@ -213,8 +212,10 @@ void CHalfLifeRules::PlayerSpawn( CBasePlayer *pPlayer )
 	// The retail player apparently spawns after the intro movie, i.e. after
 	// the map's start triggers; here he spawns at once, and m5's intro
 	// manager would strip the equipment again (player_weaponstrip at
-	// trigger_auto + 0.5 s). So equip a little later, in PlayerThink.
-	m_flNFEquipTime = gpGlobals->time + 1.5f;
+	// trigger_auto + 0.5 s). So equip a little later, in PlayerThink. The
+	// time is kept in the player (saved), so a game saved before it still
+	// equips after the load.
+	pPlayer->m_flNFEquipTime = gpGlobals->time + 1.5f;
 }
 
 //=========================================================
@@ -228,9 +229,9 @@ BOOL CHalfLifeRules::AllowAutoTargetCrosshair( void )
 //=========================================================
 void CHalfLifeRules::PlayerThink( CBasePlayer *pPlayer )
 {
-	if( m_flNFEquipTime > 0 && gpGlobals->time >= m_flNFEquipTime )
+	if( pPlayer->m_flNFEquipTime > 0 && gpGlobals->time >= pPlayer->m_flNFEquipTime )
 	{
-		m_flNFEquipTime = 0;
+		pPlayer->m_flNFEquipTime = 0;
 
 		CBaseEntity *pEquip = NULL;
 		while(( pEquip = UTIL_FindEntityByClassname( pEquip, "game_player_equip" )))
