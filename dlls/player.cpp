@@ -190,6 +190,7 @@ int gmsgStatusValue = 0;
 int gmsgNFHudMsg = 0;
 int gmsgNFPlayMovie = 0;
 int gmsgNFObjective = 0;
+int gmsgNFSetHudIcon = 0;
 
 void LinkUserMessages( void )
 {
@@ -245,6 +246,9 @@ void LinkUserMessages( void )
 
 	// Nightfire trigger_objective: reset, id, message, list title, box, list, seconds, completed
 	gmsgNFObjective = REG_USER_MSG( "Objective", -1 );
+
+	// Nightfire HUD use icon (trigger_changelevelicon): 0 off, 2 level change
+	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )

@@ -344,6 +344,7 @@ extern int gmsgHudText;
 extern int gmsgNFHudMsg;
 extern int gmsgNFPlayMovie;
 extern int gmsgNFObjective;
+extern int gmsgNFSetHudIcon;
 extern BOOL gInitHUD;
 
 #endif // PLAYER_H

@@ -5,6 +5,7 @@ nf_hud.h - James Bond 007: Nightfire (PC) in-game HUD (health iris, ammo, crossh
 #ifndef NF_HUD_H
 #define NF_HUD_H
 
+void NF_HudInit( void );		// CHud::Init (message hooks: SetHudIcon)
 void NF_HudVidInit( void );		// CHud::VidInit (sprites are freed on a map change)
 void NF_HudDraw( float flTime );	// CHud::Redraw
 bool NF_HudActive( void );		// the retail images were found

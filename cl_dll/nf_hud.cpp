@@ -29,6 +29,11 @@ by the engine fork as one-frame sprites) at their own pixel size, no scaling
 * The three-digit count (CAmmoCountPanel 0x4103b560, 640_hud_numbers.png)
   belongs to the weapon wheel (created with weapon_wheel / gadget_wheel at
   0x4103bee3) and is not drawn here.
+* Use icon (ctor 0x41040c40, setter 0x41040bf0, layout 0x41040b10; message
+  "SetHudIcon", handler 0x41049d00): one byte, 0 hides, 1-5 show
+  640_use / _use_level_trans / _use_pda / _use_qworm / _use_watch at their
+  own size, centred at the bottom edge. Only trigger_changelevelicon (2)
+  sends it here.
 
 Without the images the port's text panels (hud_redraw.cpp) stay.
 */
@@ -39,6 +44,7 @@ Without the images the port's text panels (hud_redraw.cpp) stay.
 #include "hud.h"
 #include "cl_util.h"
 #include "triangleapi.h"
+#include "parsemsg.h"
 #include "nf_hud.h"
 
 enum
@@ -97,6 +103,15 @@ static HSPRITE s_hIrisCircle, s_hIris[9], s_hIrisFlash;
 static HSPRITE s_hAmmoCircle, s_hCrosshair;
 static HSPRITE s_hClip[32], s_hBack[32], s_hFront[32];
 static bool s_bLoaded;
+
+// use icon (0x41040c40): index 1-5, 0 = hidden
+#define NF_USEICONS 6
+static const char *s_useIcons[NF_USEICONS] =
+{
+	NULL, "use", "use_level_trans", "use_pda", "use_qworm", "use_watch"
+};
+static HSPRITE s_hUseIcon[NF_USEICONS];
+static int s_iUseIcon;
 
 // gui/hud/colors.txt (retail defaults if missing): 0 = team 0 base, 1 = team 1 base,
 // 2 = team 0 accent, 3 = team 1 accent
@@ -233,9 +248,32 @@ void NF_HudVidInit( void )
 		}
 	}
 
+	for( int i = 1; i < NF_USEICONS; i++ )
+	{
+		snprintf( name, sizeof( name ), "gui/hud/640_%s.png", s_useIcons[i] );
+		s_hUseIcon[i] = SPR_Load( name );
+	}
+
 	s_bLoaded = s_hIrisCircle && s_hIris[0] && s_hAmmoCircle;
 	NF_LoadColors();
 	s_iFlashStep = 0;
+	s_iUseIcon = 0;	// retail: the level change sends 0
+}
+
+static int __MsgFunc_SetHudIcon( const char *pszName, int iSize, void *pbuf )
+{
+	BEGIN_READ( pbuf, iSize );
+	int icon = READ_BYTE();
+
+	// retail 0x41040bf0: values from 6 up are ignored
+	if( icon < NF_USEICONS )
+		s_iUseIcon = icon;
+	return 1;
+}
+
+void NF_HudInit( void )
+{
+	HOOK_MESSAGE( SetHudIcon );
 }
 
 bool NF_HudActive( void )
@@ -337,5 +375,12 @@ void NF_HudDraw( float flTime )
 			int w = NF_SpriteW( s_hCrosshair ), h = NF_SpriteH( s_hCrosshair );
 			NF_DrawImage( s_hCrosshair, ( ScreenWidth - w ) / 2, ( ScreenHeight - h ) / 2, w, h, 1.0f );
 		}
+	}
+
+	// use icon, layout 0x41040b10: centred on the bottom edge
+	if( s_iUseIcon > 0 && s_hUseIcon[s_iUseIcon] )
+	{
+		HSPRITE h = s_hUseIcon[s_iUseIcon];
+		NF_DrawCorner( h, ( ScreenWidth - NF_SpriteW( h )) / 2, ScreenHeight, s_white );
 	}
 }

@@ -304,6 +304,7 @@ void CHud::Init( void )
 	HOOK_MESSAGE( Concuss );
 	NF_HudMsgInit();
 	NF_MovieInit();
+	NF_HudInit();
 
 	// TFFree CommandMenu
 	HOOK_COMMAND( "+commandmenu", OpenCommandMenu );

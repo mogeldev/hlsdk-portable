@@ -64,6 +64,18 @@ trigger_endgame
 	game, load dialog). The timer lives in this entity instead of the game
 	rules. Not ported: the client message "SetBlends" 0 and svc_cdtrack 3
 	(music), and the global byte 0x4215b7c0 that every Use sets.
+
+trigger_changelevelicon
+	Retail CChangeLevelIcon (Spawn 0x420080b0, PlayerTouch 0x42007fe0,
+	PlayerTouchThink 0x42007f30): a trigger brush at the level exits (49
+	in 28 maps, most over a trigger_changelevel; key "master" on 11, e.g.
+	the exit opens after the objectives). A player touching it (master
+	triggered) gets "SetHudIcon" 2, the client's 640_use_level_trans.png
+	at the bottom centre; 0.5 s after the last touch "SetHudIcon" 0 hides
+	it. Retail also keeps the icon in a player field (+0xc48) so its
+	"look at a usable object" icon does not replace it, and
+	CChangeLevel::ExecuteChangeLevel sends 0; this port has no use icon
+	yet and the client clears the icon on every map load.
 */
 
 #include "extdll.h"
@@ -652,4 +664,79 @@ void CTriggerEndGame::QuitToMenuThink( void )
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
 		ALERT( at_console, "nf_debug: endgame %s mission failed -> CL_QuitToMenu\n", STRING( pev->targetname ));
 	SERVER_COMMAND( "CL_QuitToMenu\n" );
+}
+
+#define NF_HUDICON_NONE		0
+#define NF_HUDICON_LEVELTRANS	2	// client 640_use_level_trans.png
+
+class CChangeLevelIcon : public CBaseToggle
+{
+public:
+	void Spawn( void );
+	void EXPORT PlayerTouch( CBaseEntity *pOther );
+	void EXPORT PlayerTouchThink( void );
+
+	BOOL m_bShown;		// retail +0xfc
+	EHANDLE m_hPlayer;	// retail +0x100
+};
+
+LINK_ENTITY_TO_CLASS( trigger_changelevelicon, CChangeLevelIcon )
+
+void CChangeLevelIcon::Spawn( void )
+{
+	// retail 0x420080b0: a trigger brush (CBaseTrigger::InitTrigger without the movedir)
+	pev->solid = SOLID_TRIGGER;
+	pev->movetype = MOVETYPE_NONE;
+	SET_MODEL( ENT( pev ), STRING( pev->model ));
+	if( CVAR_GET_FLOAT( "showtriggers" ) == 0 )
+		SetBits( pev->effects, EF_NODRAW );
+
+	SetTouch( &CChangeLevelIcon::PlayerTouch );
+}
+
+void CChangeLevelIcon::PlayerTouch( CBaseEntity *pOther )
+{
+	// retail 0x42007fe0
+	if( !pOther || !pOther->IsPlayer( ) || !UTIL_IsMasterTriggered( m_sMaster, pOther ))
+		return;
+
+	if( !m_bShown )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgNFSetHudIcon, NULL, pOther->pev );
+			WRITE_BYTE( NF_HUDICON_LEVELTRANS );
+		MESSAGE_END();
+
+		m_bShown = TRUE;
+		m_hPlayer = pOther;
+		SetThink( &CChangeLevelIcon::PlayerTouchThink );
+
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: changelevelicon %s shown\n", STRING( pev->model ));
+	}
+
+	// hidden again 0.5 s after the last touch
+	pev->nextthink = gpGlobals->time + 0.5f;
+}
+
+void CChangeLevelIcon::PlayerTouchThink( void )
+{
+	// retail 0x42007f30
+	if( m_bShown )
+	{
+		CBaseEntity *pPlayer = m_hPlayer;
+
+		if( pPlayer )
+		{
+			MESSAGE_BEGIN( MSG_ONE, gmsgNFSetHudIcon, NULL, pPlayer->pev );
+				WRITE_BYTE( NF_HUDICON_NONE );
+			MESSAGE_END();
+		}
+
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: changelevelicon %s hidden\n", STRING( pev->model ));
+	}
+
+	m_bShown = FALSE;
+	m_hPlayer = NULL;
+	SetThink( NULL );
 }
