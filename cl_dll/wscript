@@ -54,6 +54,7 @@ def build(bld):
 		'dlls/glock.cpp',
 		'dlls/nf_pp9.cpp',
 		'dlls/nf_guns.cpp',
+		'dlls/nf_grenades.cpp',
 		'dlls/nf_materials.cpp',
 		'dlls/handgrenade.cpp',
 		'dlls/hornetgun.cpp',

@@ -73,6 +73,7 @@ set (CLDLL_SOURCES
 	../dlls/glock.cpp
 	../dlls/nf_pp9.cpp
 	../dlls/nf_guns.cpp
+	../dlls/nf_grenades.cpp
 	../dlls/nf_materials.cpp
 	ev_hldm.cpp
 	hl/hl_baseentity.cpp

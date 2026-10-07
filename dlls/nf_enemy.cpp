@@ -710,6 +710,9 @@ int CNightfireEnemy::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker
 	// m_bitsDamageType accumulates over the enemy's life; the death
 	// animation depends on the hit that kills
 	m_bitsLastDamage = bitsDamageType;
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' takes %.1f damage (type 0x%x) from %s, health %.0f\n", STRING( pev->targetname ),
+			flDamage, bitsDamageType, pevInflictor ? STRING( pevInflictor->classname ) : "-", pev->health );
 	return CHGrunt::TakeDamage( pevInflictor, pevAttacker, flDamage, bitsDamageType );
 }
 
@@ -736,12 +739,21 @@ void CNightfireEnemy::GibMonster( void )
 void CNightfireEnemy::TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType )
 {
 	// CHGrunt treats bodygroup 1 as the helmet group; Nightfire's is "heads"
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' hit in hitgroup %d: %.1f damage before the hitgroup factor\n", STRING( pev->targetname ),
+			ptr->iHitgroup, flDamage );
 	CSquadMonster::TraceAttack( pevAttacker, flDamage, vecDir, ptr, bitsDamageType );
 }
 
 void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 {
-	if( !FStringNull( m_iszDeathTarget ))
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' killed%s at %.0f %.0f %.0f (gib %d)\n", STRING( pev->targetname ),
+			HasMemory( bits_MEMORY_KILLED ) ? " again (corpse hit)" : "", pev->origin.x, pev->origin.y, pev->origin.z, iGib );
+
+	// a blast on the corpse calls Killed again (CBaseMonster::DeadTakeDamage,
+	// GIB_ALWAYS): fire the death target only on the first death
+	if( !FStringNull( m_iszDeathTarget ) && !HasMemory( bits_MEMORY_KILLED ))
 		FireTargets( STRING( m_iszDeathTarget ), CBaseEntity::Instance( pevAttacker ), this, USE_TOGGLE, 0 );
 
 	CHGrunt::Killed( pevAttacker, iGib );

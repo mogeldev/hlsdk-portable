@@ -24,6 +24,8 @@ repo (mogeldev/nightfire-xash3d).
 #define NF_WEAPON_FRINESI	10
 #define NF_WEAPON_L96A1		12
 #define NF_WEAPON_L96A1_WINTER	13
+#define NF_WEAPON_FLASHGRENADE	15
+#define NF_WEAPON_FRAGGRENADE	16
 #define WEAPON_NF_PP9		NF_WEAPON_PP9
 
 #define NF_PP9_MAX_CLIP		16	// retail GetItemInfo
@@ -173,6 +175,72 @@ public:
 	void SecondaryAttack( void ) { m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.5f; }
 	void Reload( void );
 	void WeaponIdle( void );
+};
+
+// hand grenades (dlls/nf_grenades.cpp): one class per type serves both
+// weapon_<type>grenade (1 grenade) and ammo_<type>grenade (2), like retail
+typedef struct nf_grenade_info_s
+{
+	int id;			// retail weapon id
+	const char *classname, *ammoclass;
+	const char *vmodel, *pmodel, *wmodel, *ammomodel;
+	const char *ammo;	// ammo type
+	int position;		// HUD bucket position [assumed]
+	float fuse;		// seconds from the pin pull (thrown)
+	// rolled: (forward * roll_speed + velocity) * clamp( roll_scale *
+	// (seconds held - 0.6), roll_min, roll_max ), fuse 3.75 s from the release
+	float roll_speed, roll_scale, roll_min, roll_max;
+	int flash;		// flash grenade: blinds instead of damage
+} nf_grenade_info_t;
+
+extern const nf_grenade_info_t g_nfFragGrenade;
+extern const nf_grenade_info_t g_nfFlashGrenade;
+
+// m_flStartThrow: pin pulled (time), m_flReleaseThrow: trigger let go
+// (time, -1 after a draw); m_fInAttack (iuser2): throw animation started;
+// m_fireState (iuser3): 0 = throw (primary), 1 = roll (secondary)
+class CNightfireHandGrenade : public CBasePlayerWeapon
+{
+public:
+	virtual const nf_grenade_info_t *Info( void ) = 0;
+
+	void Spawn( void );
+	void Precache( void );
+	int iItemSlot( void ) { return 5; }
+	int GetItemInfo( ItemInfo *p );
+	int AddToPlayer( CBasePlayer *pPlayer );
+
+	void PrimaryAttack( void ) { PullPin( 0 ); }
+	void SecondaryAttack( void ) { PullPin( 1 ); }
+	BOOL Deploy( void );
+	BOOL CanHolster( void ) { return m_flStartThrow == 0.0f; }
+	void Holster( int skiplocal = 0 );
+	void WeaponIdle( void );
+
+	virtual BOOL UseDecrement( void )
+	{
+#if CLIENT_WEAPONS
+		return TRUE;
+#else
+		return FALSE;
+#endif
+	}
+
+private:
+	void PullPin( int mode );
+	void Throw( void );
+};
+
+class CNightfireFragGrenade : public CNightfireHandGrenade
+{
+public:
+	const nf_grenade_info_t *Info( void ) { return &g_nfFragGrenade; }
+};
+
+class CNightfireFlashGrenade : public CNightfireHandGrenade
+{
+public:
+	const nf_grenade_info_t *Info( void ) { return &g_nfFlashGrenade; }
 };
 
 #endif // NF_WEAPONS_H

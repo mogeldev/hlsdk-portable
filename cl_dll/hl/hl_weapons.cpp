@@ -78,6 +78,8 @@ CNightfireFrinesi g_nfFrinesi;
 CNightfireL96 g_nfL96;
 CNightfireL96Winter g_nfL96Winter;
 CNightfireMinigun g_nfMinigun;
+CNightfireFragGrenade g_nfFrag;
+CNightfireFlashGrenade g_nfFlash;
 CCrowbar g_Crowbar;
 CPython g_Python;
 CMP5 g_Mp5;
@@ -645,6 +647,8 @@ void HUD_InitClientWeapons( void )
 	HUD_PrepEntity( &g_nfL96, &player );
 	HUD_PrepEntity( &g_nfL96Winter, &player );
 	HUD_PrepEntity( &g_nfMinigun, &player );
+	HUD_PrepEntity( &g_nfFrag, &player );
+	HUD_PrepEntity( &g_nfFlash, &player );
 }
 
 /*
@@ -742,6 +746,12 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 			break;
 		case NF_WEAPON_MINIGUN:
 			pWeapon = &g_nfMinigun;
+			break;
+		case NF_WEAPON_FRAGGRENADE:
+			pWeapon = &g_nfFrag;
+			break;
+		case NF_WEAPON_FLASHGRENADE:
+			pWeapon = &g_nfFlash;
 			break;
 	}
 
