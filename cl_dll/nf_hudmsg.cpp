@@ -37,9 +37,9 @@ bottom 72 px above the screen bottom; objective overview
 above the screen bottom, entries with gui/hud/check.png / circle.png. Both
 are moved up when they would cover the port's health panel. Text offsets
 inside the panels, the slide-in animation and the retail font are not
-traced [assumed]. The hint box (hint section while the overview is closed)
-is the port's own plain box; retail keeps hints in the overview only and
-flashes the HUD [assumed: shown for the duration].
+traced [assumed]. Like retail there is no hint box on the screen: a hint
+only beeps, flashes the health iris and goes into the hint section, which
+keeps the last 4 lines (retail ring, 0x41041f60).
 */
 
 #include <string.h>
@@ -63,7 +63,10 @@ typedef struct
 	float endTime;
 } nf_msgbox_t;
 
-static nf_msgbox_t s_hint;	// hint section (lower left)
+#define NF_HINT_LINES		4	// retail ring of 4 lines x 256 chars
+
+static char s_hints[NF_HINT_LINES][NF_MSG_LINELEN];	// hint section, oldest first
+static int s_hintCount;
 static nf_msgbox_t s_timed;	// timed message box (centre)
 static char s_text[2048];	// last received text
 
@@ -97,14 +100,6 @@ static int NF_HealthPanelTop( void )
 	if( NF_HudActive( ))
 		return ScreenHeight;
 	return ScreenHeight - YRES( 58 );
-}
-
-// bottom of the port's own hint box: above the health iris / text panel
-static int NF_HintBottom( void )
-{
-	if( NF_HudActive( ))
-		return ScreenHeight - 128 - YRES( 4 );
-	return ScreenHeight - YRES( 58 ) - YRES( 8 );
 }
 
 // word-wrap text (with '\n' paragraphs) into box lines no wider than maxWidth pixels
@@ -167,9 +162,37 @@ static void NF_WrapText( nf_msgbox_t *box, const char *text, int maxWidth )
 		box->numLines--;
 }
 
-static int NF_HintWidth( void )
+// retail 0x41041f60: each line of the text (split at '\n', 255 chars) goes
+// into the ring; the oldest line drops out
+static void NF_HintAdd( const char *text )
 {
-	return XRES( 300 );
+	for( const char *p = text; *p; )
+	{
+		const char *end = strchr( p, '\n' );
+		int len = end ? (int)( end - p ) : (int)strlen( p );
+		if( len > 0 && p[len - 1] == '\r' )
+			len--;	// retail drops the character before the line break
+		if( len > NF_MSG_LINELEN - 1 )
+			len = NF_MSG_LINELEN - 1;
+
+		if( s_hintCount == NF_HINT_LINES )
+		{
+			memmove( s_hints[0], s_hints[1], sizeof( s_hints[0] ) * ( NF_HINT_LINES - 1 ));
+			s_hintCount--;
+		}
+		memcpy( s_hints[s_hintCount], p, len );
+		s_hints[s_hintCount][len] = '\0';
+		s_hintCount++;
+
+		if( !end )
+			break;
+		p = end + 1;
+	}
+}
+
+static void NF_HintClear( void )
+{
+	s_hintCount = 0;
 }
 
 // text width inside the message box
@@ -198,8 +221,7 @@ static int __MsgFunc_Objective( const char *pszName, int iSize, void *pbuf )
 	if( reset )
 	{
 		s_objCount = 0;
-		s_hint.numLines = 0;
-		s_hint.endTime = 0.0f;
+		NF_HintClear();
 		s_timed.endTime = 0.0f;
 	}
 
@@ -283,8 +305,7 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 
 	if( !name[0] )
 	{
-		s_hint.numLines = 0;
-		s_hint.endTime = 0.0f;
+		NF_HintClear();
 		return 1;
 	}
 
@@ -298,8 +319,7 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 
 	if( hint )
 	{
-		NF_WrapText( &s_hint, s_text, NF_HintWidth() - XRES( 18 ));
-		s_hint.endTime = gHUD.m_flTime + duration;
+		NF_HintAdd( s_text );
 		gEngfuncs.pfnPlaySoundByName( "common/hint_beep.wav", 1.0f );
 		NF_HudFlash();	// retail 0x41040740: the health iris flashes
 	}
@@ -311,8 +331,8 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 	}
 
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
-		gEngfuncs.Con_Printf( "nf_debug: hudmsg '%s' %s timed %d hint %d duration %.1f\n",
-			name, found ? "found" : "NOT FOUND", timed, hint, duration );
+		gEngfuncs.Con_Printf( "nf_debug: hudmsg '%s' %s timed %d hint %d duration %.1f (%d hint lines)\n",
+			name, found ? "found" : "NOT FOUND", timed, hint, duration, s_hintCount );
 	return 1;
 }
 
@@ -369,14 +389,20 @@ static void NF_DrawOverviewImage( int lineHeight )
 	ty = y + (int)( 395 * s );
 	int hintEnd = y + (int)( 500 * s );
 	DrawSetTextColor( 1.0f, 1.0f, 1.0f );
-	for( int l = 0; l < s_hint.numLines && ty + lineHeight <= hintEnd; l++, ty += lineHeight )
-		DrawConsoleString( x + (int)( 22 * s ), ty, s_hint.lines[l] );
+	for( int i = 0; i < s_hintCount; i++ )
+	{
+		nf_msgbox_t hint;
+		NF_WrapText( &hint, s_hints[i], size - (int)( 44 * s ));
+		for( int l = 0; l < hint.numLines && ty + lineHeight <= hintEnd; l++, ty += lineHeight )
+			DrawConsoleString( x + (int)( 22 * s ), ty, hint.lines[l] );
+	}
 }
 
 // objective overview: centred plain panel with the objective list and the hint section
 static void NF_DrawOverview( int lineHeight )
 {
 	static nf_msgbox_t entry[NF_OBJ_MAX];
+	static nf_msgbox_t hint;
 	if( s_hOverviewBg )
 	{
 		NF_DrawOverviewImage( lineHeight );
@@ -394,10 +420,19 @@ static void NF_DrawOverview( int lineHeight )
 	}
 	if( s_objCount == 0 )
 		lines++;
-	if( s_hint.numLines > 0 )
-		lines += 1 + s_hint.numLines;
 
-	int height = lines * lineHeight + padY * 2 + ( s_hint.numLines > 0 ? lineHeight / 2 : 0 );
+	hint.numLines = 0;
+	for( int i = 0; i < s_hintCount; i++ )
+	{
+		nf_msgbox_t part;
+		NF_WrapText( &part, s_hints[i], width - padX * 2 - mark );
+		for( int l = 0; l < part.numLines && hint.numLines < NF_MSG_LINES; l++ )
+			strcpy( hint.lines[hint.numLines++], part.lines[l] );
+	}
+	if( hint.numLines > 0 )
+		lines += 1 + hint.numLines;
+
+	int height = lines * lineHeight + padY * 2 + ( hint.numLines > 0 ? lineHeight / 2 : 0 );
 	int x = ( ScreenWidth - width ) / 2;
 	int y = ( ScreenHeight - height ) / 3;
 
@@ -441,15 +476,15 @@ static void NF_DrawOverview( int lineHeight )
 		ty += n * lineHeight;
 	}
 
-	if( s_hint.numLines > 0 )
+	if( hint.numLines > 0 )
 	{
 		ty += lineHeight / 2;
 		DrawSetTextColor( 0.83f, 0.69f, 0.22f );
 		DrawConsoleString( x + padX, ty, "HINT" );
 		ty += lineHeight;
 		DrawSetTextColor( 1.0f, 1.0f, 1.0f );
-		for( int l = 0; l < s_hint.numLines; l++ )
-			DrawConsoleString( x + padX + mark, ty + l * lineHeight, s_hint.lines[l] );
+		for( int l = 0; l < hint.numLines; l++ )
+			DrawConsoleString( x + padX + mark, ty + l * lineHeight, hint.lines[l] );
 	}
 }
 
@@ -462,9 +497,9 @@ void NF_HudMsgInit( void )
 
 void NF_HudMsgReset( void )
 {
-	// the objective list stays: it lasts across level changes and the server
-	// resets / resends it after a new game or a load
-	memset( &s_hint, 0, sizeof( s_hint ));
+	// the objective list and the hints stay (retail: the panel keeps them):
+	// they last across level changes and the server resets / resends them
+	// after a new game or a load
 	memset( &s_timed, 0, sizeof( s_timed ));
 	s_overview = false;
 
@@ -490,8 +525,6 @@ void NF_HudMsgDraw( float flTime )
 		return;
 	}
 
-	int hintBottom = NF_HintBottom();
-
 	if( s_timed.numLines > 0 && flTime < s_timed.endTime )
 	{
 		if( s_hBoxBg )
@@ -503,7 +536,6 @@ void NF_HudMsgDraw( float flTime )
 			if( bottom > NF_HealthPanelTop() - YRES( 4 ))
 				bottom = NF_HealthPanelTop() - YRES( 4 );
 			int x = ScreenHeight / 30, y = bottom - h;
-			hintBottom = y - YRES( 4 );	// the hint box goes above it
 			NF_DrawImage( s_hBoxBg, x, y, w, h, 1.0f );
 
 			int lines = s_timed.numLines;
@@ -519,11 +551,5 @@ void NF_HudMsgDraw( float flTime )
 			int width = NF_TimedWidth();
 			NF_DrawBox( &s_timed, ( ScreenWidth - width ) / 2, ScreenHeight * 3 / 10, width, lineHeight, XRES( 12 ), YRES( 10 ));
 		}
-	}
-
-	if( s_hint.numLines > 0 && flTime < s_hint.endTime )
-	{
-		int height = s_hint.numLines * lineHeight + YRES( 7 ) * 2;
-		NF_DrawBox( &s_hint, XRES( 16 ), hintBottom - height, NF_HintWidth(), lineHeight, XRES( 9 ), YRES( 7 ));
 	}
 }
