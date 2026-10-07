@@ -37,6 +37,7 @@
 #include "com_model.h"
 #include "nf_gun_info.h"	// James Bond 007: Nightfire
 #include "nf_materials.h"
+#include "nf_debug.h"
 
 extern engine_studio_api_t IEngineStudio;
 
@@ -334,6 +335,13 @@ static char *EV_NF_DamageDecal( pmtrace_t *pTrace, physent_t *pe )
 
 	// retail: glass gets the breakable decal on breakable entities
 	decal = NF_ImpactDecal( NF_TextureMaterial( tex ), pe->classnumber == 1, gEngfuncs.pfnRandomLong( 1, 4 ));
+	if( NF_DEBUG( NF_DBG_DECALS ))
+	{
+		char mat = NF_TextureMaterial( tex );
+		gEngfuncs.Con_Printf( "nf_debug: impact ent %d at %.1f %.1f %.1f texture '%s' material %c decal '%s' index %d\n",
+			pTrace->ent, pTrace->endpos[0], pTrace->endpos[1], pTrace->endpos[2], tex ? tex : "(none)", mat ? mat : '-',
+			decal ? decal : "(none)", decal ? gEngfuncs.pEfxAPI->Draw_DecalIndexFromName( (char *)decal ) : 0 );
+	}
 	strncpy( decalname, decal ? decal : "", sizeof( decalname ) - 1 );
 	decalname[sizeof( decalname ) - 1] = '\0';
 	return decalname;
@@ -675,6 +683,10 @@ void EV_FireNFGun( event_args_t *args )
 		gEngfuncs.pEventAPI->EV_PlaySound( idx, origin, CHAN_WEAPON, g->fire_sound,
 			gEngfuncs.pfnRandomFloat( 0.92, 1.0 ), g->quiet ? ATTN_STATIC : ATTN_NORM, 0, 94 + gEngfuncs.pfnRandomLong( 0, 0xf ));
 	}
+
+	if( NF_DEBUG( NF_DBG_WEAPONS ))
+		gEngfuncs.Con_Printf( "nf_debug: fire event id %d ent %d local %d seq %d body %d empty %d sound %d t %.3f\n",
+			g->id, idx, EV_IsLocal( idx ), seq, args->iparam2 >> 8, args->bparam1, play_sound, gEngfuncs.GetClientTime());
 
 	EV_GetDefaultShellInfo( args, origin, velocity, ShellVelocity, ShellOrigin, forward, right, up, 20, -12, 4 );
 	EV_EjectBrass( ShellOrigin, ShellVelocity, angles[YAW], shell, TE_BOUNCE_SHELL );

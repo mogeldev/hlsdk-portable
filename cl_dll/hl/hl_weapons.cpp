@@ -32,6 +32,17 @@
 #include "../hud_iface.h"
 #include "../com_weapons.h"
 #include "../demo.h"
+#include "nf_debug.h"
+
+// James Bond 007: Nightfire port diagnostics (client side, see nf_debug.h)
+int NF_DebugBits( void )
+{
+	static cvar_t *nf_debug;
+
+	if( !nf_debug )
+		nf_debug = gEngfuncs.pfnGetCvarPointer( "nf_debug" );
+	return nf_debug ? (int)nf_debug->value : 0;
+}
 
 extern globalvars_t *gpGlobals;
 extern int g_iUser1;
@@ -840,6 +851,20 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 	{
 		( (CRpg *)player.m_pActiveItem )->m_fSpotActive = (int)from->client.vuser2[1];
 		( (CRpg *)player.m_pActiveItem )->m_cActiveRockets = (int)from->client.vuser2[2];
+	}
+
+	// the weapon state the server sent vs the predicting object (a weapon
+	// whose g_pWpns slot another weapon took predicts nothing); printed when
+	// it changes while the trigger is held
+	static int s_nfLastState = -1;
+	const weapon_data_t *wd = ( from->client.m_iId > 0 && from->client.m_iId < MAX_WEAPONS ) ? &from->weapondata[from->client.m_iId] : NULL;
+	const int nfstate = wd ? ( wd->m_iId << 24 ) ^ ( wd->m_iClip << 12 ) ^ ( wd->iuser2 << 4 ) ^ wd->iuser3 ^ ( pWeapon->m_iClip << 16 ) : -1;
+	if( g_runfuncs && ( cmd->buttons & IN_ATTACK ) && NF_DEBUG( NF_DBG_WEAPONS ) && wd && nfstate != s_nfLastState )
+	{
+		s_nfLastState = nfstate;
+		gEngfuncs.Con_Printf( "nf_debug: predict id %d: sent id %d clip %d inattack %d firestate %d fuser1 %.3f | object clip %d nextattack %.3f slot %s\n",
+			from->client.m_iId, wd->m_iId, wd->m_iClip, wd->iuser2, wd->iuser3, wd->fuser1, pWeapon->m_iClip, player.m_flNextAttack,
+			g_pWpns[from->client.m_iId] == pWeapon ? "ok" : "TAKEN" );
 	}
 
 	// Don't go firing anything if we have died.

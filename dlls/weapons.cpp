@@ -31,6 +31,7 @@
 #include "decals.h"
 #include "gamerules.h"
 #include "nf_materials.h"
+#include "nf_debug.h"
 
 extern CGraph WorldGraph;
 extern int gEvilImpulse101;
@@ -172,10 +173,18 @@ static BOOL NF_DecalGunshot( TraceResult *pTrace )
 	Vector vecEnd = pTrace->vecEndPos - pTrace->vecPlaneNormal * 4.0f;
 	const char *tex = TRACE_TEXTURE( pTrace->pHit, vecSrc, vecEnd );
 	const char *decal = NF_ImpactDecal( NF_TextureMaterial( tex ), FClassnameIs( pTrace->pHit, "func_breakable" ), RANDOM_LONG( 1, 4 ));
+	int index = decal ? DECAL_INDEX( decal ) : -1;
+
+	if( NF_DEBUG( NF_DBG_DECALS ))
+	{
+		char mat = NF_TextureMaterial( tex );
+		ALERT( at_console, "nf_debug: impact (server) %s at %.1f %.1f %.1f texture '%s' material %c decal '%s' index %d\n",
+			STRING( VARS( pTrace->pHit )->classname ), pTrace->vecEndPos.x, pTrace->vecEndPos.y, pTrace->vecEndPos.z,
+			tex ? tex : "(none)", mat ? mat : '-', decal ? decal : "(none)", index );
+	}
+
 	if( !decal )
 		return TRUE;	// N: no effects
-
-	int index = DECAL_INDEX( decal );
 	if( index < 0 )
 		return TRUE;
 

@@ -34,6 +34,7 @@
 #include "soundent.h"
 #include "gamerules.h"
 #include "game.h"
+#include "nf_debug.h"
 
 #define MONSTER_CUT_CORNER_DIST		8 // 8 means the monster's bounding box is contained without the box of the node in WC
 
@@ -2071,6 +2072,21 @@ void CBaseMonster::StartMonster( void )
 		if( !WALK_MOVE( ENT( pev ), 0, 0, WALKMOVE_NORMAL ) )
 		{
 			ALERT( at_error, "Monster %s stuck in wall--level design error\n", STRING( pev->classname ) );
+
+			// James Bond 007: Nightfire port: what failed (hull overlap, or the
+			// floor check SV_CheckBottom with its point traces)
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+			{
+				TraceResult tr;
+
+				TRACE_MONSTER_HULL( edict(), pev->origin, pev->origin + Vector( 0, 0, 1 ), dont_ignore_monsters, edict(), &tr );
+				ALERT( at_console, "nf_debug: stuck '%s' (%s) at %.1f %.1f %.1f size %.0f %.0f %.0f: hull startsolid %d by %s; on floor %d; contents under corners %d %d %d %d\n",
+					STRING( pev->targetname ), STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z,
+					pev->size.x, pev->size.y, pev->size.z, tr.fStartSolid, tr.pHit ? STRING( VARS( tr.pHit )->classname ) : "-",
+					ENT_IS_ON_FLOOR( edict()),
+					POINT_CONTENTS( pev->origin + Vector( pev->mins.x, pev->mins.y, -1 )), POINT_CONTENTS( pev->origin + Vector( pev->maxs.x, pev->mins.y, -1 )),
+					POINT_CONTENTS( pev->origin + Vector( pev->mins.x, pev->maxs.y, -1 )), POINT_CONTENTS( pev->origin + Vector( pev->maxs.x, pev->maxs.y, -1 )));
+			}
 
 			if( g_psv_developer && g_psv_developer->value )
 				pev->effects = EF_BRIGHTFIELD;

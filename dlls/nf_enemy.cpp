@@ -56,6 +56,7 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "animation.h"
 #include "hgrunt.h"
 #include "nodes.h"
+#include "nf_debug.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
 #define NF_ENEMY_SPAWNFLAGS_HL	0x3FF
@@ -447,6 +448,11 @@ void CNightfireEnemy::Spawn( void )
 		m_flMaxPatrolPath = 2048;	// [assumed] the value on most retail enemies
 
 	MonsterInit();
+
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: spawn enemy '%s' %s (%s) at %.0f %.0f %.0f weapon %d grenades %d spawnflags 0x%x\n",
+			STRING( pev->targetname ), STRING( m_iszCharName ), STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z,
+			m_iWeapon, m_cGrenades, pev->spawnflags );
 
 	// MonsterInit resets the sight distance to the HLSDK default
 	if( m_flSightDist > 0 )

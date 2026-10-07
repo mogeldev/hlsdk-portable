@@ -24,6 +24,7 @@ Built into the server and the client (weapon prediction).
 #include "nodes.h"
 #include "player.h"
 #include "nf_weapons.h"
+#include "nf_debug.h"
 
 //=========================================================
 // weapon descriptions
@@ -393,6 +394,14 @@ void CNightfireGun::FireRound( int pellets, float spread, int seq )
 	// iparam1 weapon id, iparam2 fire sequence | body << 8
 	PLAYBACK_EVENT_FULL( flags, m_pPlayer->edict(), m_usFire, 0.0, g_vecZero, g_vecZero, vecDir.x, vecDir.y,
 		g->id, seq | ( Body() << 8 ), ( m_iClip == 0 ) ? 1 : 0, 0 );
+
+#ifndef CLIENT_DLL
+	// the server's side of a round; the client's prediction is shown by
+	// HUD_WeaponsPostThink (cl_dll/hl/hl_weapons.cpp)
+	if( NF_DEBUG( NF_DBG_WEAPONS ))
+		ALERT( at_console, "nf_debug: fire round id %d clip %d ammo %d seq %d pellets %d damage %d inattack %d firestate %d fuser1 %.3f\n",
+			g->id, m_iClip, m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType], seq, pellets, damage, m_fInAttack, m_fireState, pev->fuser1 );
+#endif
 }
 
 void CNightfireGun::PrimaryAttack( void )
