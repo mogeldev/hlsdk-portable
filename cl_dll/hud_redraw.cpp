@@ -16,6 +16,7 @@
 // hud_redraw.cpp
 //
 #include <cmath>
+#include <stdio.h>
 
 #include "hud.h"
 #include "cl_util.h"
@@ -37,6 +38,55 @@ extern int g_iVisibleMouse;
 float HUD_GetFOV( void );
 
 extern cvar_t *sensitivity;
+
+static void DrawNightfireStatus( void )
+{
+	if( !gHUD.m_pCvarDraw || !gHUD.m_pCvarDraw->value ||
+		( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL ) || gEngfuncs.IsSpectateOnly() )
+		return;
+
+	const int margin = XRES( 16 );
+	const int panelY = ScreenHeight - YRES( 58 );
+	const int panelHeight = YRES( 40 );
+	char value[64];
+
+	if( !( gHUD.m_iHideHUDDisplay & HIDEHUD_HEALTH ) )
+	{
+		const int x = margin;
+		const int width = XRES( 150 );
+		gEngfuncs.pfnFillRGBABlend( x, panelY, width, panelHeight, 8, 12, 15, 210 );
+		FillRGBA( x, panelY, width, YRES( 2 ), 58, 180, 166, 255 );
+		DrawSetTextColor( 0.72f, 0.88f, 0.84f );
+		DrawConsoleString( x + XRES( 9 ), panelY + YRES( 7 ), "HEALTH" );
+		snprintf( value, sizeof( value ), "%d", Q_max( 0, gHUD.m_Health.m_iHealth ) );
+		DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+		DrawConsoleString( x + XRES( 9 ), panelY + YRES( 20 ), value );
+	}
+
+	if( !( gHUD.m_iHideHUDDisplay & HIDEHUD_WEAPONS ) )
+	{
+		const int width = XRES( 250 );
+		const int x = ScreenWidth - margin - width;
+		gEngfuncs.pfnFillRGBABlend( x, panelY, width, panelHeight, 8, 12, 15, 210 );
+		FillRGBA( x, panelY, width, YRES( 2 ), 58, 180, 166, 255 );
+
+		const char *weapon = gHUD.m_Ammo.GetCurrentWeaponName();
+		DrawSetTextColor( 0.72f, 0.88f, 0.84f );
+		DrawConsoleString( x + XRES( 9 ), panelY + YRES( 7 ), weapon[0] ? weapon : "WEAPON" );
+
+		const int clip = gHUD.m_Ammo.GetCurrentWeaponClip();
+		const int reserve = gHUD.m_Ammo.GetCurrentWeaponAmmo();
+		if( clip >= 0 && reserve >= 0 )
+			snprintf( value, sizeof( value ), "%d / %d", clip, reserve );
+		else if( clip >= 0 )
+			snprintf( value, sizeof( value ), "%d", clip );
+		else
+			strlcpy( value, "--", sizeof( value ) );
+
+		DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+		DrawConsoleString( x + XRES( 9 ), panelY + YRES( 20 ), value );
+	}
+}
 
 // Think
 void CHud::Think( void )
@@ -95,20 +145,27 @@ void CHud::Think( void )
 // returns 1 if they've changed, 0 otherwise
 int CHud::Redraw( float flTime, int intermission )
 {
-	// Nightfire ships no Half-Life HUD sprites; skip drawing if the HUD never
-	// initialized (m_HUD_number_0 stays -1) to avoid drawing uninitialised
-	// element sprites.
-	if( m_HUD_number_0 == -1 )
-		return 0;
-
-	m_fOldTime = m_flTime;	// save time of previous redraw
+	m_fOldTime = m_flTime;
 	m_flTime = flTime;
 	m_flTimeDelta = (double)( m_flTime - m_fOldTime );
-	static float m_flShotTime = 0;
-
-	// Clock was reset, reset delta
 	if( m_flTimeDelta < 0 )
 		m_flTimeDelta = 0;
+
+	// Nightfire ships no Half-Life HUD sprite set, so skip the sprite-based HUD
+	// elements and keep the text-centric HUD layer alive instead of dropping the
+	// whole client UI.
+	if( m_HUD_number_0 == -1 )
+	{
+		m_Message.Draw( flTime );
+		m_SayText.Draw( flTime );
+		m_StatusBar.Draw( flTime );
+		m_Menu.Draw( flTime );
+		m_MOTD.Draw( flTime );
+		DrawNightfireStatus();
+		return 1;
+	}
+
+	static float m_flShotTime = 0;
 
 	// Bring up the scoreboard during intermission
 	if (gViewPort)

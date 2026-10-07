@@ -311,6 +311,21 @@ void CHudAmmo::Reset( void )
 	m_pWeapon = NULL; // reset last weapon
 }
 
+const char *CHudAmmo::GetCurrentWeaponName( void ) const
+{
+	return m_pWeapon ? m_pWeapon->szName : "";
+}
+
+int CHudAmmo::GetCurrentWeaponClip( void ) const
+{
+	return m_pWeapon ? m_pWeapon->iClip : -1;
+}
+
+int CHudAmmo::GetCurrentWeaponAmmo( void ) const
+{
+	return m_pWeapon && m_pWeapon->iAmmoType >= 0 ? gWR.CountAmmo( m_pWeapon->iAmmoType ) : -1;
+}
+
 int CHudAmmo::VidInit( void )
 {
 	// Load sprites for buckets (top row of weapon menu)

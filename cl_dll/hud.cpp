@@ -553,9 +553,19 @@ void CHud::VidInit( void )
 
 	if( m_HUD_number_0 == -1 )
 	{
-		// Nightfire ships no Half-Life HUD sprite set (sprites/hud.txt). Skip
-		// HUD font init but keep the client alive so the world still renders.
-		gEngfuncs.Con_Printf( "HUD: number_0 sprite not found, HUD disabled\n" );
+		// Nightfire ships no Half-Life HUD sprite set (sprites/hud.txt). Keep the
+		// client alive and continue with the text-based HUD layer so objective
+		// messages, menus and saytext still render.
+		m_iFontHeight = 12;
+		gEngfuncs.Con_Printf( "HUD: number_0 sprite not found, using text-only fallback\n" );
+
+		m_Message.VidInit();
+		m_StatusBar.VidInit();
+		m_DeathNotice.VidInit();
+		m_SayText.VidInit();
+		m_Menu.VidInit();
+		m_TextMessage.VidInit();
+		m_MOTD.VidInit();
 		return;
 	}
 
