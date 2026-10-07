@@ -20,6 +20,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "nf_hudmsg.h"
 //#include "triangleapi.h"
 
 #include "vgui_TeamFortressViewport.h"
@@ -162,6 +163,7 @@ int CHud::Redraw( float flTime, int intermission )
 		m_Menu.Draw( flTime );
 		m_MOTD.Draw( flTime );
 		DrawNightfireStatus();
+		NF_HudMsgDraw( flTime );
 		return 1;
 	}
 
@@ -224,6 +226,9 @@ int CHud::Redraw( float flTime, int intermission )
 
 			pList = pList->pNext;
 		}
+
+		if( !intermission )
+			NF_HudMsgDraw( flTime );
 	}
 
 	// are we in demo mode? do we need to draw the logo in the top corner?

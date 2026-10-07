@@ -112,6 +112,7 @@ set (SVDLL_SOURCES
 	nf_guns.cpp
 	nf_materials.cpp
 	nf_debug.cpp
+	nf_triggers.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp

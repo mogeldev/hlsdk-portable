@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "parsemsg.h"
+#include "nf_hudmsg.h"
 #include "vgui_int.h"
 #include "vgui_TeamFortressViewport.h"
 
@@ -299,6 +300,7 @@ void CHud::Init( void )
 	HOOK_MESSAGE( ViewMode );
 	HOOK_MESSAGE( SetFOV );
 	HOOK_MESSAGE( Concuss );
+	NF_HudMsgInit();
 
 	// TFFree CommandMenu
 	HOOK_COMMAND( "+commandmenu", OpenCommandMenu );
@@ -439,6 +441,8 @@ void CHud::VidInit( void )
 	int j;
 	m_scrinfo.iSize = sizeof(m_scrinfo);
 	GetScreenInfo( &m_scrinfo );
+
+	NF_HudMsgReset();
 
 	// ----------
 	// Load Sprites
