@@ -27,6 +27,7 @@
 #include "saverestore.h"
 #include "trains.h"			// trigger_camera has train functionality
 #include "gamerules.h"
+#include "nf_debug.h"
 
 #define	SF_TRIGGER_PUSH_START_OFF	2//spawnflag that makes trigger_push spawn turned OFF
 #define SF_TRIGGER_HURT_TARGETONCE	1// Only fire hurt target once
@@ -267,6 +268,10 @@ public:
 
 	static TYPEDESCRIPTION m_SaveData[];
 
+	// Nightfire: multi_kill_manager overrides these two (retail vtable slots 72/73)
+	virtual void ManagerFire( string_t iTarget ) { FireTargets( STRING( iTarget ), m_hActivator, this, USE_TOGGLE, 0 ); }
+	virtual CMultiManager *CreateClone( void ) { return GetClassPtr( (CMultiManager *)NULL ); }
+
 	int m_cTargets; // the total number of targets in this manager's fire list.
 	int m_index;	// Current target
 	float m_startTime;// Time we started firing
@@ -375,7 +380,7 @@ void CMultiManager::ManagerThink( void )
 	time = gpGlobals->time - m_startTime;
 	while( m_index < m_cTargets && m_flTargetDelay[m_index] <= time )
 	{
-		FireTargets( STRING( m_iTargetName[m_index] ), m_hActivator, this, USE_TOGGLE, 0 );
+		ManagerFire( m_iTargetName[m_index] );
 		m_index++;
 	}
 
@@ -395,7 +400,7 @@ void CMultiManager::ManagerThink( void )
 
 CMultiManager *CMultiManager::Clone( void )
 {
-	CMultiManager *pMulti = GetClassPtr( (CMultiManager *)NULL );
+	CMultiManager *pMulti = CreateClone();
 
 	edict_t *pEdict = pMulti->pev->pContainingEntity;
 	memcpy( pMulti->pev, pev, sizeof(*pev) );
@@ -442,6 +447,39 @@ void CMultiManager::ManagerReport( void )
 	}
 }
 #endif
+
+//**********************************************************
+// Nightfire multi_kill_manager: a multi_manager that removes its targets
+// instead of firing them. Retail (game.dll, factory 0x4200a400, vtable
+// 0x42105194) is the multi_manager with two other vtable slots: the think
+// (0x4200a270) removes every entity whose targetname matches a key once its
+// delay has passed, and the clone (0x4200a410) makes a kill manager. Keys,
+// "wait", spawnflags, use and save data are the multi_manager's. The maps
+// use it to drop failure relays, guards and chat sequences that are no
+// longer needed (e.g. "kill_other_fails").
+class CMultiKillManager : public CMultiManager
+{
+public:
+	void ManagerFire( string_t iTarget );
+	CMultiManager *CreateClone( void ) { return GetClassPtr( (CMultiKillManager *)NULL ); }
+};
+
+LINK_ENTITY_TO_CLASS( multi_kill_manager, CMultiKillManager )
+
+void CMultiKillManager::ManagerFire( string_t iTarget )
+{
+	int count = 0;
+	edict_t *pentTarget = NULL;
+
+	while( !FNullEnt( pentTarget = FIND_ENTITY_BY_TARGETNAME( pentTarget, STRING( iTarget ))))
+	{
+		UTIL_Remove( CBaseEntity::Instance( pentTarget ));
+		count++;
+	}
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: multi_kill_manager %s removed %s (%d)\n", STRING( pev->targetname ), STRING( iTarget ), count );
+}
 
 //***********************************************************
 //
