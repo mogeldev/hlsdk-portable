@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include "parsemsg.h"
 #include "nf_hudmsg.h"
+#include "nf_hud.h"
 #include "nf_movie.h"
 #include "vgui_int.h"
 #include "vgui_TeamFortressViewport.h"
@@ -445,6 +446,7 @@ void CHud::VidInit( void )
 	GetScreenInfo( &m_scrinfo );
 
 	NF_HudMsgReset();
+	NF_HudVidInit();
 
 	// ----------
 	// Load Sprites

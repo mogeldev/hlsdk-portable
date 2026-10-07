@@ -321,6 +321,11 @@ int CHudAmmo::GetCurrentWeaponClip( void ) const
 	return m_pWeapon ? m_pWeapon->iClip : -1;
 }
 
+int CHudAmmo::GetCurrentWeaponId( void ) const
+{
+	return m_pWeapon ? m_pWeapon->iId : 0;
+}
+
 int CHudAmmo::GetCurrentWeaponAmmo( void ) const
 {
 	return m_pWeapon && m_pWeapon->iAmmoType >= 0 ? gWR.CountAmmo( m_pWeapon->iAmmoType ) : -1;

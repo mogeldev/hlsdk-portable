@@ -50,7 +50,7 @@ flashes the HUD [assumed: shown for the duration].
 #include "parsemsg.h"
 #include "nf_debug.h"
 #include "nf_hudmsg.h"
-#include "triangleapi.h"
+#include "nf_hud.h"
 
 #define NF_MSG_LINES		12
 #define NF_MSG_LINELEN		256
@@ -90,10 +90,21 @@ static float NF_PanelScale( void )
 	return ScreenHeight / 768.0f;
 }
 
-// top of the port's health panel (hud_redraw.cpp DrawNightfireStatus)
+// top of the port's text health panel (hud_redraw.cpp DrawNightfireStatus);
+// with the retail HUD the panels keep their retail place (over the iris, like retail)
 static int NF_HealthPanelTop( void )
 {
+	if( NF_HudActive( ))
+		return ScreenHeight;
 	return ScreenHeight - YRES( 58 );
+}
+
+// bottom of the port's own hint box: above the health iris / text panel
+static int NF_HintBottom( void )
+{
+	if( NF_HudActive( ))
+		return ScreenHeight - 128 - YRES( 4 );
+	return ScreenHeight - YRES( 58 ) - YRES( 8 );
 }
 
 // word-wrap text (with '\n' paragraphs) into box lines no wider than maxWidth pixels
@@ -167,29 +178,6 @@ static int NF_TimedWidth( void )
 	if( s_hBoxBg )
 		return (int)( 1024 * NF_PanelScale() * 0.8f );
 	return XRES( 420 );
-}
-
-static void NF_DrawImage( HSPRITE hspr, int x, int y, int w, int h, float alpha )
-{
-	const struct model_s *model = gEngfuncs.GetSpritePointer( hspr );
-	if( !model )
-		return;
-
-	gEngfuncs.pTriAPI->SpriteTexture( (struct model_s *)model, 0 );
-	gEngfuncs.pTriAPI->RenderMode( kRenderTransAlpha );
-	gEngfuncs.pTriAPI->CullFace( TRI_NONE );
-	gEngfuncs.pTriAPI->Color4f( 1.0f, 1.0f, 1.0f, alpha );
-	gEngfuncs.pTriAPI->Begin( TRI_QUADS );
-		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 0.0f );
-		gEngfuncs.pTriAPI->Vertex3f( x, y, 0.0f );
-		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 0.0f );
-		gEngfuncs.pTriAPI->Vertex3f( x + w, y, 0.0f );
-		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 1.0f );
-		gEngfuncs.pTriAPI->Vertex3f( x + w, y + h, 0.0f );
-		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 1.0f );
-		gEngfuncs.pTriAPI->Vertex3f( x, y + h, 0.0f );
-	gEngfuncs.pTriAPI->End();
-	gEngfuncs.pTriAPI->RenderMode( kRenderNormal );
 }
 
 // text of a title from maps/<map>.tit (a leading '#' is skipped; unknown names stay as they are)
@@ -313,6 +301,7 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 		NF_WrapText( &s_hint, s_text, NF_HintWidth() - XRES( 18 ));
 		s_hint.endTime = gHUD.m_flTime + duration;
 		gEngfuncs.pfnPlaySoundByName( "common/hint_beep.wav", 1.0f );
+		NF_HudFlash();	// retail 0x41040740: the health iris flashes
 	}
 
 	if( timed )
@@ -501,7 +490,7 @@ void NF_HudMsgDraw( float flTime )
 		return;
 	}
 
-	int hintBottom = NF_HealthPanelTop() - YRES( 8 );	// above the health panel
+	int hintBottom = NF_HintBottom();
 
 	if( s_timed.numLines > 0 && flTime < s_timed.endTime )
 	{

@@ -111,6 +111,7 @@ public:
 	const char *GetCurrentWeaponName( void ) const;
 	int GetCurrentWeaponClip( void ) const;
 	int GetCurrentWeaponAmmo( void ) const;
+	int GetCurrentWeaponId( void ) const;
 	int MsgFunc_CurWeapon( const char *pszName, int iSize, void *pbuf );
 	int MsgFunc_WeaponList( const char *pszName, int iSize, void *pbuf );
 	int MsgFunc_AmmoX( const char *pszName, int iSize, void *pbuf );

@@ -107,6 +107,7 @@ set (CLDLL_SOURCES
 	interpolation.cpp
 	menu.cpp
 	message.cpp
+	nf_hud.cpp
 	nf_hudmsg.cpp
 	nf_movie.cpp
 	MOTD.cpp

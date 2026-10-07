@@ -21,6 +21,7 @@
 #include "hud.h"
 #include "cl_util.h"
 #include "nf_hudmsg.h"
+#include "nf_hud.h"
 //#include "triangleapi.h"
 
 #include "vgui_TeamFortressViewport.h"
@@ -162,7 +163,11 @@ int CHud::Redraw( float flTime, int intermission )
 		m_StatusBar.Draw( flTime );
 		m_Menu.Draw( flTime );
 		m_MOTD.Draw( flTime );
-		DrawNightfireStatus();
+		// the retail HUD images (nf_hud.cpp), else the port's text panels
+		if( NF_HudActive( ))
+			NF_HudDraw( flTime );
+		else
+			DrawNightfireStatus();
 		NF_HudMsgDraw( flTime );
 		return 1;
 	}
