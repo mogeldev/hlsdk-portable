@@ -343,6 +343,7 @@ public:
 extern int gmsgHudText;
 extern int gmsgNFHudMsg;
 extern int gmsgNFPlayMovie;
+extern int gmsgNFObjective;
 extern BOOL gInitHUD;
 
 #endif // PLAYER_H

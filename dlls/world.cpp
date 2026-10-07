@@ -33,6 +33,7 @@
 #include "weapons.h"
 #include "gamerules.h"
 #include "teamplay_gamerules.h"
+#include "nf_triggers.h"
 
 extern CGraph WorldGraph;
 extern CSoundEnt *pSoundEnt;
@@ -372,8 +373,9 @@ int CGlobalState::Save( CSave &save )
 
 		pEntity = pEntity->pNext;
 	}
-	
-	return 1;
+
+	// Nightfire objective list (retail: "OENT" records)
+	return NF_ObjectivesSave( save );
 }
 
 int CGlobalState::Restore( CRestore &restore )
@@ -394,6 +396,7 @@ int CGlobalState::Restore( CRestore &restore )
 			return 0;
 		EntityAdd( MAKE_STRING( tmpEntity.name ), MAKE_STRING( tmpEntity.levelName ), tmpEntity.state );
 	}
+	NF_ObjectivesRestore( restore );
 	return 1;
 }
 
@@ -415,6 +418,7 @@ void CGlobalState::ClearStates( void )
 		pFree = pNext;
 	}
 	Reset();
+	NF_ObjectivesClear();
 }
 
 void SaveGlobalState( SAVERESTOREDATA *pSaveData )

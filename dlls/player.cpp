@@ -36,6 +36,7 @@
 #include "game.h"
 #include "pm_shared.h"
 #include "hltv.h"
+#include "nf_triggers.h"
 
 // #define DUCKFIX
 
@@ -188,6 +189,7 @@ int gmsgStatusValue = 0;
 
 int gmsgNFHudMsg = 0;
 int gmsgNFPlayMovie = 0;
+int gmsgNFObjective = 0;
 
 void LinkUserMessages( void )
 {
@@ -240,6 +242,9 @@ void LinkUserMessages( void )
 
 	// Nightfire trigger_playmovie: movie name (retail size -1)
 	gmsgNFPlayMovie = REG_USER_MSG( "PlayMovie", -1 );
+
+	// Nightfire trigger_objective: reset, id, message, list title, box, list, seconds, completed
+	gmsgNFObjective = REG_USER_MSG( "Objective", -1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )
@@ -4249,6 +4254,9 @@ void CBasePlayer::UpdateClientData( void )
 		UpdateStatusBar();
 		m_flNextSBarUpdateTime = gpGlobals->time + 0.2f;
 	}
+
+	// Nightfire: objective list after a load / new game
+	NF_ObjectivesUpdateClient( this );
 }
 
 //=========================================================

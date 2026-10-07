@@ -29,6 +29,7 @@ extern "C"
 #include <ctype.h>
 
 #include "vgui_TeamFortressViewport.h"
+#include "nf_hudmsg.h"
 
 extern "C" 
 {
@@ -649,6 +650,12 @@ void IN_Impulse( void )
 void IN_ScoreDown( void )
 {
 	KeyDown( &in_score );
+	// Nightfire: in single player the key shows the objective overview
+	if( gEngfuncs.GetMaxClients() == 1 )
+	{
+		NF_ObjectivesShowOverview( true );
+		return;
+	}
 	if ( gHUD.UseVguiScoreBoard() && gViewPort )
 	{
 		gViewPort->ShowScoreBoard();
@@ -660,6 +667,7 @@ void IN_ScoreDown( void )
 void IN_ScoreUp( void )
 {
 	KeyUp( &in_score );
+	NF_ObjectivesShowOverview( false );
 	if ( gViewPort )
 	{
 		gViewPort->HideScoreBoard();

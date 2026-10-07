@@ -1,5 +1,6 @@
 /*
 nf_hudmsg.cpp - James Bond 007: Nightfire (PC) level messages ("HudMsg")
+and mission objectives ("Objective")
 
 Sent by trigger_hudmessage (dlls/nf_triggers.cpp): title name, timed flag,
 hint flag, duration in tenths of a second. The retail client
@@ -11,6 +12,20 @@ lines, 0x41041f60) and common/hint_beep.wav plays (0x41040740); with the
 timed flag it is shown in the message box (CObjectivePanel) for the given
 time. An empty name clears the hint section. The HUD toggle does not hide
 either panel.
+
+"Objective" (trigger_objective, dlls/nf_triggers.cpp; retail client.dll
+0x41048590): reset byte (clear the list, the hints and the box), id (255 =
+nothing more), message title, list title, box byte, list byte, seconds,
+completed. With a message: the box byte shows the message in the box for
+the given time with common/obj_open.wav (not while the overview is open);
+the list byte adds the entry (list title, else the message title; an id
+that is there already keeps its text, 0x410417c0). The completed byte is
+always applied (check / circle icon in retail).
+
+Objective overview (CObjectiveOverviewPanel): in single player the
+scoreboard key (+showscores) opens it (retail 0x41046e10 toggles it on
+press and closes it on release, 0x41046e50); it lists the objectives and
+the hint section. NF_ObjectivesShowOverview is called from input.cpp.
 
 Not the retail look yet: plain boxes in the style of the text HUD fallback
 (hud_redraw.cpp); the hint stays on screen for the duration (retail: kept
@@ -40,6 +55,20 @@ typedef struct
 static nf_msgbox_t s_hint;	// hint section (lower left)
 static nf_msgbox_t s_timed;	// timed message box (centre)
 static char s_text[2048];	// last received text
+
+#define NF_OBJ_MAX		64
+#define NF_OBJ_TEXTLEN		256
+
+typedef struct
+{
+	int id;
+	char text[NF_OBJ_TEXTLEN];
+	int completed;
+} nf_objentry_t;
+
+static nf_objentry_t s_obj[NF_OBJ_MAX];	// objective list, in arrival order
+static int s_objCount;
+static bool s_overview;			// objective overview open
 
 // word-wrap text (with '\n' paragraphs) into box lines no wider than maxWidth pixels
 static void NF_WrapText( nf_msgbox_t *box, const char *text, int maxWidth )
@@ -111,6 +140,96 @@ static int NF_TimedWidth( void )
 	return XRES( 420 );
 }
 
+// text of a title from maps/<map>.tit (a leading '#' is skipped; unknown names stay as they are)
+static const char *NF_TitleText( const char *name, bool *found )
+{
+	client_textmessage_t *msg = gEngfuncs.pfnTextMessageGet( name[0] == '#' ? name + 1 : name );
+	if( found )
+		*found = msg && msg->pMessage;
+	return ( msg && msg->pMessage ) ? msg->pMessage : name;
+}
+
+static int __MsgFunc_Objective( const char *pszName, int iSize, void *pbuf )
+{
+	char message[64], listName[64];
+
+	BEGIN_READ( pbuf, iSize );
+	int reset = READ_BYTE();
+	if( reset )
+	{
+		s_objCount = 0;
+		s_hint.numLines = 0;
+		s_hint.endTime = 0.0f;
+		s_timed.endTime = 0.0f;
+	}
+
+	int id = READ_BYTE();
+	if( id == 255 )
+		return 1;
+
+	strncpy( message, READ_STRING(), sizeof( message ) - 1 );
+	message[sizeof( message ) - 1] = '\0';
+	strncpy( listName, READ_STRING(), sizeof( listName ) - 1 );
+	listName[sizeof( listName ) - 1] = '\0';
+	int box = READ_BYTE();
+	int list = READ_BYTE();
+	int duration = READ_BYTE();
+	int completed = READ_BYTE();
+
+	bool found = false;
+	if( message[0] )
+	{
+		if( box )
+		{
+			strncpy( s_text, NF_TitleText( message, &found ), sizeof( s_text ) - 1 );
+			s_text[sizeof( s_text ) - 1] = '\0';
+			NF_WrapText( &s_timed, s_text, NF_TimedWidth() - XRES( 24 ));
+			if( !s_overview )
+			{
+				s_timed.endTime = gHUD.m_flTime + ( duration > 0 ? duration : NF_MSG_DEFAULT_TIME );
+				gEngfuncs.pfnPlaySoundByName( "common/obj_open.wav", 1.0f );
+			}
+		}
+
+		int i;
+		for( i = 0; i < s_objCount; i++ )
+		{
+			if( s_obj[i].id == id )
+				break;
+		}
+		if( list && i == s_objCount && s_objCount < NF_OBJ_MAX )
+		{
+			nf_objentry_t *e = &s_obj[s_objCount++];
+			e->id = id;
+			strncpy( e->text, NF_TitleText( listName[0] ? listName : message, NULL ), sizeof( e->text ) - 1 );
+			e->text[sizeof( e->text ) - 1] = '\0';
+			e->completed = 0;
+		}
+	}
+
+	for( int i = 0; i < s_objCount; i++ )
+	{
+		if( s_obj[i].id == id )
+			s_obj[i].completed = completed;
+	}
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		gEngfuncs.Con_Printf( "nf_debug: objective %d '%s' %s list '%s' box %d list %d duration %d completed %d reset %d (%d in list)\n",
+			id, message, message[0] && box ? ( found ? "found" : "NOT FOUND" ) : "-", listName, box, list, duration, completed, reset, s_objCount );
+	return 1;
+}
+
+void NF_ObjectivesShowOverview( bool show )
+{
+	if( show == s_overview )
+		return;
+
+	s_overview = show;
+	if( show )
+		s_timed.endTime = 0.0f;	// the box closes under the overview
+	gEngfuncs.pfnPlaySoundByName( show ? "common/obj_open.wav" : "common/obj_close.wav", 1.0f );
+}
+
 static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 {
 	char name[256];
@@ -129,8 +248,8 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 		return 1;
 	}
 
-	client_textmessage_t *msg = gEngfuncs.pfnTextMessageGet( name[0] == '#' ? name + 1 : name );
-	const char *text = ( msg && msg->pMessage ) ? msg->pMessage : name;
+	bool found;
+	const char *text = NF_TitleText( name, &found );
 	strncpy( s_text, text, sizeof( s_text ) - 1 );
 	s_text[sizeof( s_text ) - 1] = '\0';
 
@@ -152,7 +271,7 @@ static int __MsgFunc_HudMsg( const char *pszName, int iSize, void *pbuf )
 
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
 		gEngfuncs.Con_Printf( "nf_debug: hudmsg '%s' %s timed %d hint %d duration %.1f\n",
-			name, msg ? "found" : "NOT FOUND", timed, hint, duration );
+			name, found ? "found" : "NOT FOUND", timed, hint, duration );
 	return 1;
 }
 
@@ -168,16 +287,94 @@ static void NF_DrawBox( const nf_msgbox_t *box, int x, int y, int width, int lin
 		DrawConsoleString( x + padX, y + padY + i * lineHeight, box->lines[i] );
 }
 
+// objective overview: centred panel with the objective list and the hint section
+static void NF_DrawOverview( int lineHeight )
+{
+	static nf_msgbox_t entry[NF_OBJ_MAX];
+	int width = XRES( 460 );
+	int padX = XRES( 14 ), padY = YRES( 10 ), mark = XRES( 18 );
+	int lines = 1;	// title
+
+	for( int i = 0; i < s_objCount; i++ )
+	{
+		NF_WrapText( &entry[i], s_obj[i].text, width - padX * 2 - mark );
+		lines += entry[i].numLines > 0 ? entry[i].numLines : 1;
+	}
+	if( s_objCount == 0 )
+		lines++;
+	if( s_hint.numLines > 0 )
+		lines += 1 + s_hint.numLines;
+
+	int height = lines * lineHeight + padY * 2 + ( s_hint.numLines > 0 ? lineHeight / 2 : 0 );
+	int x = ( ScreenWidth - width ) / 2;
+	int y = ( ScreenHeight - height ) / 3;
+
+	gEngfuncs.pfnFillRGBABlend( x, y, width, height, 8, 12, 15, 225 );
+	FillRGBA( x, y, width, YRES( 2 ), 58, 180, 166, 255 );
+
+	int ty = y + padY;
+	DrawSetTextColor( 0.83f, 0.69f, 0.22f );
+	DrawConsoleString( x + padX, ty, "OBJECTIVES" );
+	ty += lineHeight;
+
+	if( s_objCount == 0 )
+	{
+		DrawSetTextColor( 0.6f, 0.6f, 0.6f );
+		DrawConsoleString( x + padX + mark, ty, "(none)" );
+		ty += lineHeight;
+	}
+
+	for( int i = 0; i < s_objCount; i++ )
+	{
+		// marker: filled = completed (retail check.png), outline = open (circle.png)
+		int box = lineHeight / 2;
+		int bx = x + padX, by = ty + ( lineHeight - box ) / 2 - YRES( 1 );
+		if( s_obj[i].completed )
+			FillRGBA( bx, by, box, box, 58, 180, 166, 255 );
+		else
+		{
+			FillRGBA( bx, by, box, 1, 200, 200, 200, 255 );
+			FillRGBA( bx, by + box - 1, box, 1, 200, 200, 200, 255 );
+			FillRGBA( bx, by, 1, box, 200, 200, 200, 255 );
+			FillRGBA( bx + box - 1, by, 1, box, 200, 200, 200, 255 );
+		}
+
+		if( s_obj[i].completed )
+			DrawSetTextColor( 0.6f, 0.6f, 0.6f );
+		else
+			DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+		int n = entry[i].numLines > 0 ? entry[i].numLines : 1;
+		for( int l = 0; l < entry[i].numLines; l++ )
+			DrawConsoleString( x + padX + mark, ty + l * lineHeight, entry[i].lines[l] );
+		ty += n * lineHeight;
+	}
+
+	if( s_hint.numLines > 0 )
+	{
+		ty += lineHeight / 2;
+		DrawSetTextColor( 0.83f, 0.69f, 0.22f );
+		DrawConsoleString( x + padX, ty, "HINT" );
+		ty += lineHeight;
+		DrawSetTextColor( 1.0f, 1.0f, 1.0f );
+		for( int l = 0; l < s_hint.numLines; l++ )
+			DrawConsoleString( x + padX + mark, ty + l * lineHeight, s_hint.lines[l] );
+	}
+}
+
 void NF_HudMsgInit( void )
 {
 	HOOK_MESSAGE( HudMsg );
+	HOOK_MESSAGE( Objective );
 	NF_HudMsgReset();
 }
 
 void NF_HudMsgReset( void )
 {
+	// the objective list stays: it lasts across level changes and the server
+	// resets / resends it after a new game or a load
 	memset( &s_hint, 0, sizeof( s_hint ));
 	memset( &s_timed, 0, sizeof( s_timed ));
+	s_overview = false;
 }
 
 void NF_HudMsgDraw( float flTime )
@@ -188,6 +385,12 @@ void NF_HudMsgDraw( float flTime )
 	int w, lineHeight;
 	GetConsoleStringSize( "Ay", &w, &lineHeight );
 	lineHeight += YRES( 2 );
+
+	if( s_overview )
+	{
+		NF_DrawOverview( lineHeight );
+		return;
+	}
 
 	if( s_hint.numLines > 0 && flTime < s_hint.endTime )
 	{

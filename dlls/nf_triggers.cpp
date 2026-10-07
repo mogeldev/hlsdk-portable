@@ -12,6 +12,31 @@ trigger_hudmessage
 	only, with a beep). The message goes to everybody; without a player
 	the retail game warns and drops it.
 
+trigger_objective
+	Retail CTriggerObjective (game.dll, Use 0x42011b30, KeyValue
+	0x42011a90). Keys: "idkey" (objective number), "completed" (0/1),
+	"duration" (seconds, atoi in retail), "message" (title shown in the
+	message box), "netname" (title of the entry in the objective list).
+	Use adds the objective to the global list (CGlobalState, retail
+	0x421ad6c0: id, title = netname or else message, map name, completed)
+	or, when it is there already and "completed" is set, marks it done;
+	then sends "Objective" to everybody: reset 0, id, message, netname,
+	box flag (spawnflags & 1), list flag (!(spawnflags & 2)), duration,
+	completed. After a save game is loaded the list is sent again (reset
+	flag on the first entry, titles only); after a new game the client
+	list and hints are cleared (retail 0x420d3a10 / 0x420d3ab0 from the
+	player's client update). Precaches common/obj_open.wav and
+	obj_close.wav (played by the client).
+
+trigger_playerfreeze
+	Retail CTriggerPlayerFreeze (Use 0x42011f20, Spawn 0x42012030,
+	Restore 0x42011fd0, PlayerFreezeDelay 0x42011f80). Removed in
+	multiplayer. Each Use flips the state (starts with control enabled) and
+	calls EnableControl on all players (FL_FROZEN). After a restore with
+	the player frozen it applies the state again after 0.5 s. Spawnflag 1
+	sets a global (0x4215b7c4, also reset by the world spawn) whose
+	meaning is not traced; not ported.
+
 trigger_togglehud
 	Retail CToggleHud::HudToggleUse (0x420a4f20) sends "ToggleHud" to all
 	clients: USE_OFF hides the HUD panels, USE_ON shows them, anything else
@@ -42,7 +67,9 @@ trigger_endgame
 #include "player.h"
 #include "skill.h"
 #include "saverestore.h"
+#include "gamerules.h"
 #include "nf_debug.h"
+#include "nf_triggers.h"
 
 #define SF_HUDMESSAGE_TIMED	1
 #define SF_HUDMESSAGE_NOHINT	2
@@ -126,6 +153,333 @@ void CTriggerHudMessage::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
 		ALERT( at_console, "nf_debug: hudmessage %s \"%s\" timed %d hint %d duration %.1f\n",
 			STRING( pev->targetname ), STRING( pev->message ), timed, hint, tenths / 10.0f );
+}
+
+#define NF_MAX_OBJECTIVES	64
+
+typedef struct
+{
+	int id;
+	char name[64];		// title of the list entry (netname, else message)
+	char levelName[32];	// map that added it
+	int completed;
+} nf_objective_t;
+
+typedef struct
+{
+	int count;
+	nf_objective_t list[NF_MAX_OBJECTIVES];	// in the order they were added (retail: newest first)
+} nf_objectives_t;
+
+static nf_objectives_t s_objectives;
+static BOOL s_bObjectivesResend;	// send the whole list to the client (after a restore)
+static BOOL s_bObjectivesClear;	// clear the client list and hints (new game)
+
+static TYPEDESCRIPTION gObjectivesSaveData[] =
+{
+	DEFINE_FIELD( nf_objectives_t, count, FIELD_INTEGER ),
+};
+
+static TYPEDESCRIPTION gObjectiveSaveData[] =
+{
+	DEFINE_FIELD( nf_objective_t, id, FIELD_INTEGER ),
+	DEFINE_ARRAY( nf_objective_t, name, FIELD_CHARACTER, 64 ),
+	DEFINE_ARRAY( nf_objective_t, levelName, FIELD_CHARACTER, 32 ),
+	DEFINE_FIELD( nf_objective_t, completed, FIELD_INTEGER ),
+};
+
+static nf_objective_t *NF_ObjectiveFind( int id )
+{
+	for( int i = 0; i < s_objectives.count; i++ )
+	{
+		if( s_objectives.list[i].id == id )
+			return &s_objectives.list[i];
+	}
+	return NULL;
+}
+
+int NF_ObjectivesSave( CSave &save )
+{
+	if( !save.WriteFields( "NFOBJ", &s_objectives, gObjectivesSaveData, ARRAYSIZE( gObjectivesSaveData )))
+		return 0;
+
+	for( int i = 0; i < s_objectives.count; i++ )
+	{
+		if( !save.WriteFields( "OENT", &s_objectives.list[i], gObjectiveSaveData, ARRAYSIZE( gObjectiveSaveData )))
+			return 0;
+	}
+	return 1;
+}
+
+void NF_ObjectivesRestore( CRestore &restore )
+{
+	// saves made before the objectives were ported have no "NFOBJ" (ReadFields rewinds)
+	if( !restore.ReadFields( "NFOBJ", &s_objectives, gObjectivesSaveData, ARRAYSIZE( gObjectivesSaveData )))
+	{
+		s_objectives.count = 0;
+		return;
+	}
+
+	int count = s_objectives.count;
+	s_objectives.count = 0;
+	for( int i = 0; i < count && s_objectives.count < NF_MAX_OBJECTIVES; i++ )
+	{
+		if( !restore.ReadFields( "OENT", &s_objectives.list[s_objectives.count], gObjectiveSaveData, ARRAYSIZE( gObjectiveSaveData )))
+			break;
+		s_objectives.count++;
+	}
+
+	if( s_objectives.count > 0 )
+		s_bObjectivesResend = TRUE;
+}
+
+void NF_ObjectivesClear( void )
+{
+	memset( &s_objectives, 0, sizeof( s_objectives ));
+	s_bObjectivesResend = FALSE;
+	s_bObjectivesClear = TRUE;
+}
+
+void NF_ObjectivesUpdateClient( CBasePlayer *pPlayer )
+{
+	if( s_bObjectivesResend )
+	{
+		for( int i = 0; i < s_objectives.count; i++ )
+		{
+			const nf_objective_t *obj = &s_objectives.list[i];
+
+			MESSAGE_BEGIN( MSG_ONE, gmsgNFObjective, NULL, pPlayer->pev );
+				WRITE_BYTE( i == 0 );	// reset the client list first
+				WRITE_BYTE( obj->id );
+				WRITE_STRING( obj->name );
+				WRITE_STRING( "" );
+				WRITE_BYTE( 0 );	// no message box
+				WRITE_BYTE( 1 );	// list entry
+				WRITE_BYTE( 0 );
+				WRITE_BYTE( obj->completed );
+			MESSAGE_END();
+		}
+
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: objectives resent (%d)\n", s_objectives.count );
+		s_bObjectivesResend = FALSE;
+		s_bObjectivesClear = FALSE;
+	}
+
+	if( s_bObjectivesClear )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgNFObjective, NULL, pPlayer->pev );
+			WRITE_BYTE( 1 );	// reset
+			WRITE_BYTE( 255 );	// no entry
+		MESSAGE_END();
+
+		MESSAGE_BEGIN( MSG_ONE, gmsgNFHudMsg, NULL, pPlayer->pev );
+			WRITE_STRING( "" );	// clear the hint section
+			WRITE_BYTE( 0 );
+			WRITE_BYTE( 0 );
+			WRITE_BYTE( 0 );
+		MESSAGE_END();
+
+		s_bObjectivesClear = FALSE;
+	}
+}
+
+#define SF_OBJECTIVE_BOX	1
+#define SF_OBJECTIVE_NOLIST	2
+
+class CTriggerObjective : public CPointEntity
+{
+public:
+	void Spawn( void );
+	void Precache( void );
+	void KeyValue( KeyValueData *pkvd );
+	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+	int m_iId;
+	BOOL m_bCompleted;
+	int m_iDuration;
+};
+
+LINK_ENTITY_TO_CLASS( trigger_objective, CTriggerObjective )
+
+TYPEDESCRIPTION CTriggerObjective::m_SaveData[] =
+{
+	DEFINE_FIELD( CTriggerObjective, m_iId, FIELD_INTEGER ),
+	DEFINE_FIELD( CTriggerObjective, m_bCompleted, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CTriggerObjective, m_iDuration, FIELD_INTEGER ),
+};
+
+IMPLEMENT_SAVERESTORE( CTriggerObjective, CPointEntity )
+
+void CTriggerObjective::Spawn( void )
+{
+	Precache();
+	CPointEntity::Spawn();
+}
+
+void CTriggerObjective::Precache( void )
+{
+	PRECACHE_SOUND( "common/obj_open.wav" );
+	PRECACHE_SOUND( "common/obj_close.wav" );
+}
+
+void CTriggerObjective::KeyValue( KeyValueData *pkvd )
+{
+	if( FStrEq( pkvd->szKeyName, "idkey" ))
+	{
+		m_iId = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "completed" ))
+	{
+		m_bCompleted = atoi( pkvd->szValue ) != 0;
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "duration" ))
+	{
+		m_iDuration = atoi( pkvd->szValue );	// retail: atoi, "2.5" -> 2 s
+		pkvd->fHandled = TRUE;
+	}
+	else
+		CPointEntity::KeyValue( pkvd );
+}
+
+void CTriggerObjective::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
+{
+	CBaseEntity *pPlayer = ( pActivator && pActivator->IsPlayer( )) ? pActivator : UTIL_PlayerByIndex( 1 );
+	if( !pPlayer )
+		ALERT( at_console, "Objective Added before player initialized\n" );
+
+	nf_objective_t *obj = NF_ObjectiveFind( m_iId );
+	if( !obj )
+	{
+		if( s_objectives.count < NF_MAX_OBJECTIVES )
+		{
+			obj = &s_objectives.list[s_objectives.count++];
+			obj->id = m_iId;
+			string_t title = !FStringNull( pev->netname ) ? pev->netname : pev->message;
+			strncpy( obj->name, STRING( title ), sizeof( obj->name ) - 1 );
+			obj->name[sizeof( obj->name ) - 1] = '\0';
+			strncpy( obj->levelName, STRING( gpGlobals->mapname ), sizeof( obj->levelName ) - 1 );
+			obj->levelName[sizeof( obj->levelName ) - 1] = '\0';
+			obj->completed = m_bCompleted;
+		}
+		else
+			ALERT( at_console, "trigger_objective %s: more than %d objectives\n", STRING( pev->targetname ), NF_MAX_OBJECTIVES );
+	}
+	else if( m_bCompleted )
+		obj->completed = TRUE;
+
+	if( !pPlayer )
+	{
+		ALERT( at_console, "trigger_objective %s used when player not initialized!\n", STRING( pev->message ));
+		return;
+	}
+
+	int box = ( pev->spawnflags & SF_OBJECTIVE_BOX ) ? 1 : 0;
+	int list = ( pev->spawnflags & SF_OBJECTIVE_NOLIST ) ? 0 : 1;
+	int duration = m_iDuration < 0 ? 0 : ( m_iDuration > 255 ? 255 : m_iDuration );
+
+	MESSAGE_BEGIN( MSG_ALL, gmsgNFObjective );
+		WRITE_BYTE( 0 );	// no reset
+		WRITE_BYTE( m_iId );
+		WRITE_STRING( STRING( pev->message ));
+		WRITE_STRING( STRING( pev->netname ));
+		WRITE_BYTE( box );
+		WRITE_BYTE( list );
+		WRITE_BYTE( duration );	// whole seconds
+		WRITE_BYTE( m_bCompleted ? 1 : 0 );
+	MESSAGE_END();
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: objective %s id %d \"%s\" list \"%s\" box %d list %d duration %d completed %d (%d in list)\n",
+			STRING( pev->targetname ), m_iId, STRING( pev->message ), STRING( pev->netname ),
+			box, list, duration, m_bCompleted ? 1 : 0, s_objectives.count );
+}
+
+class CTriggerPlayerFreeze : public CPointEntity
+{
+public:
+	void Spawn( void );
+	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+	void EXPORT PlayerFreezeDelay( void );
+
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+	void Apply( void );
+
+	BOOL m_bControl;	// players may move
+};
+
+LINK_ENTITY_TO_CLASS( trigger_playerfreeze, CTriggerPlayerFreeze )
+
+TYPEDESCRIPTION CTriggerPlayerFreeze::m_SaveData[] =
+{
+	DEFINE_FIELD( CTriggerPlayerFreeze, m_bControl, FIELD_BOOLEAN ),
+};
+
+int CTriggerPlayerFreeze::Save( CSave &save )
+{
+	if( !CPointEntity::Save( save ))
+		return 0;
+	return save.WriteFields( "CTriggerPlayerFreeze", this, m_SaveData, ARRAYSIZE( m_SaveData ));
+}
+
+int CTriggerPlayerFreeze::Restore( CRestore &restore )
+{
+	if( !CPointEntity::Restore( restore ))
+		return 0;
+	int status = restore.ReadFields( "CTriggerPlayerFreeze", this, m_SaveData, ARRAYSIZE( m_SaveData ));
+
+	// retail: freeze the restored player again a little later
+	if( status && !m_bControl )
+	{
+		SetThink( &CTriggerPlayerFreeze::PlayerFreezeDelay );
+		pev->nextthink = gpGlobals->time + 0.5f;
+	}
+	return status;
+}
+
+void CTriggerPlayerFreeze::Spawn( void )
+{
+	if( g_pGameRules->IsMultiplayer( ))
+	{
+		REMOVE_ENTITY( ENT( pev ));
+		return;
+	}
+	m_bControl = TRUE;
+	CPointEntity::Spawn();
+}
+
+void CTriggerPlayerFreeze::Apply( void )
+{
+	for( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = (CBasePlayer *)UTIL_PlayerByIndex( i );
+		if( pPlayer )
+			pPlayer->EnableControl( m_bControl );
+	}
+}
+
+void CTriggerPlayerFreeze::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
+{
+	m_bControl = !m_bControl;
+	Apply();
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: playerfreeze %s -> player %s\n", STRING( pev->targetname ), m_bControl ? "free" : "frozen" );
+}
+
+void CTriggerPlayerFreeze::PlayerFreezeDelay( void )
+{
+	Apply();
+	SetThink( NULL );
 }
 
 class CTriggerToggleHud : public CPointEntity
