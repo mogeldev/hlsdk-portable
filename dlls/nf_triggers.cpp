@@ -23,6 +23,17 @@ trigger_playmovie
 	(movies/<name>[.avi]); sends "PlayMovie" with the name to player 1, the
 	activator does not matter. The client hands it to the engine
 	(nf_playmovie), which plays it full-screen while the game waits.
+
+trigger_endgame
+	Retail CTriggerEndGame (Use 0x42010900, KeyValue 0x420108b0, Precache
+	0x420108a0). Key "status": 0 (default) mission failed, 1 success
+	(m3_japan01, never fired), 2 game won (m9_space01 "endgame"). Status 1
+	and 2 play common/stinger.wav at the player (ambient, vol 1, attn
+	1.25); 2 also sets the retail cvars sv_newunit / sv_iamdone (not in
+	this port) and sends the engine command "CL_GameSuccess" (leave the
+	game, m9_outro). Status 0 (bond_death.wav, 5 s fade to black, a client
+	message, game rules timer +10 s; gamerules vtable slot 29, 0x420c2900,
+	then cd track 3) is not implemented yet: only the nf_debug line.
 */
 
 #include "extdll.h"
@@ -175,4 +186,72 @@ void CTriggerPlayMovie::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_
 
 	if( NF_DEBUG( NF_DBG_TRIGGERS ))
 		ALERT( at_console, "nf_debug: playmovie %s \"%s\"\n", STRING( pev->targetname ), STRING( pev->message ));
+}
+
+#define NF_ENDGAME_FAILED	0
+#define NF_ENDGAME_SUCCESS	1
+#define NF_ENDGAME_WON		2
+
+class CTriggerEndGame : public CPointEntity
+{
+public:
+	void Spawn( void );
+	void Precache( void );
+	void KeyValue( KeyValueData *pkvd );
+	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+	int m_iStatus;
+};
+
+LINK_ENTITY_TO_CLASS( trigger_endgame, CTriggerEndGame )
+
+TYPEDESCRIPTION CTriggerEndGame::m_SaveData[] =
+{
+	DEFINE_FIELD( CTriggerEndGame, m_iStatus, FIELD_INTEGER ),
+};
+
+IMPLEMENT_SAVERESTORE( CTriggerEndGame, CPointEntity )
+
+void CTriggerEndGame::Spawn( void )
+{
+	Precache();
+	CPointEntity::Spawn();
+}
+
+void CTriggerEndGame::Precache( void )
+{
+	PRECACHE_SOUND( "common/stinger.wav" );
+}
+
+void CTriggerEndGame::KeyValue( KeyValueData *pkvd )
+{
+	if( FStrEq( pkvd->szKeyName, "status" ))
+	{
+		m_iStatus = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else
+		CPointEntity::KeyValue( pkvd );
+}
+
+void CTriggerEndGame::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
+{
+	// retail: the activator if it is a player, else player 1
+	CBaseEntity *pPlayer = ( pActivator && pActivator->IsPlayer( )) ? pActivator : UTIL_PlayerByIndex( 1 );
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: endgame %s status %d%s\n", STRING( pev->targetname ), m_iStatus,
+			m_iStatus == NF_ENDGAME_FAILED ? " (mission failed: not implemented)" : "" );
+
+	if( !pPlayer || m_iStatus == NF_ENDGAME_FAILED )
+		return;
+
+	UTIL_EmitAmbientSound( pPlayer->edict(), pPlayer->pev->origin, "common/stinger.wav", 1.0f, 1.25f, 0, PITCH_NORM );
+
+	if( m_iStatus == NF_ENDGAME_WON )
+		SERVER_COMMAND( "CL_GameSuccess\n" );
 }
