@@ -94,6 +94,14 @@ void CItem::Spawn( void )
 	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 16 ) );
 	SetTouch( &CItem::ItemTouch );
 
+	// Nightfire: spawnflag 1 keeps the item where the mapper put it
+	// (retail CItem::Spawn 0x42076e90: MOVETYPE_NONE, no DROP_TO_FLOOR)
+	if( FBitSet( pev->spawnflags, 1 ))
+	{
+		pev->movetype = MOVETYPE_NONE;
+		return;
+	}
+
 	if( DROP_TO_FLOOR(ENT( pev ) ) == 0 )
 	{
 		ALERT(at_error, "Item %s fell out of level at %f,%f,%f\n", STRING( pev->classname ), (double)pev->origin.x, (double)pev->origin.y, (double)pev->origin.z);

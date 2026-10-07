@@ -355,6 +355,8 @@ void W_Precache( void )
 	UTIL_PrecacheOther( "item_antidote" );
 	UTIL_PrecacheOther( "item_security" );
 	UTIL_PrecacheOther( "item_longjump" );
+	UTIL_PrecacheOther( "item_armor_plate" );	// Nightfire (dlls/nf_items.cpp); game_player_equip gives the vest
+	UTIL_PrecacheOther( "item_armor_vest" );
 
 	// James Bond 007: Nightfire weapons (dlls/nf_*.cpp) use the retail weapon
 	// ids, which overlap the Half-Life ones (PP9 = 2, MP9 = 5, SIG552 = 7, ...),

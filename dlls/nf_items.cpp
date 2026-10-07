@@ -15,6 +15,8 @@ item_breakable - a prop that breaks when damaged (monitors, PCs, phones):
                  "damagedbody" (body after breaking; the prop stays),
                  "hitanim" / "posthitanim" (sequence on hit / after it),
                  "explosionscale", "material" (4 on all electronics: sparks).
+item_armor_plate / item_armor_vest - health pickups (retail CArmorPlate /
+                 CArmorVest, docs/retail/player.md *Armour pickups*).
 */
 
 #include "extdll.h"
@@ -22,6 +24,12 @@ item_breakable - a prop that breaks when damaged (monitors, PCs, phones):
 #include "cbase.h"
 #include "animation.h"
 #include "effects.h"
+#include "weapons.h"
+#include "player.h"
+#include "skill.h"
+#include "items.h"
+#include "gamerules.h"
+#include "nf_debug.h"
 
 static Vector NF_ParseVector( const char *s )
 {
@@ -316,4 +324,90 @@ void CNightfireBreakable::Killed( entvars_t *pevAttacker, int iGib )
 		SetThink( &CBaseEntity::SUB_Remove );
 		pev->nextthink = gpGlobals->time + 0.1f;
 	}
+}
+
+// Armour pickups. Despite the name they heal: retail MyTouch calls the
+// player's TakeHealth (the HL health kit with another model, sound and amount;
+// CArmorPlate 0x42072e50, CArmorVest 0x42072f50). Spawnflag 1 (float) is
+// handled in CItem::Spawn.
+extern int gmsgItemPickup;
+
+class CNightfireArmor : public CItem
+{
+protected:
+	BOOL GiveHealth( CBasePlayer *pPlayer, float flHealth, const char *pszSound );
+};
+
+BOOL CNightfireArmor::GiveHealth( CBasePlayer *pPlayer, float flHealth, const char *pszSound )
+{
+	float flBefore = pPlayer->pev->health;
+
+	if( pPlayer->pev->deadflag != DEAD_NO )
+		return FALSE;
+
+	if( !pPlayer->TakeHealth( flHealth, DMG_GENERIC ))
+		return FALSE;	// full health: the item stays (touched every frame, so no print)
+
+	if( NF_DEBUG( NF_DBG_ITEMS ))
+		ALERT( at_console, "nf_debug: %s health %.0f -> %.0f\n", STRING( pev->classname ), flBefore, pPlayer->pev->health );
+
+	MESSAGE_BEGIN( MSG_ONE, gmsgItemPickup, NULL, pPlayer->pev );
+		WRITE_STRING( STRING( pev->classname ));
+	MESSAGE_END();
+
+	EMIT_SOUND( ENT( pPlayer->pev ), CHAN_STATIC, pszSound, 1, ATTN_NORM );
+
+	if( g_pGameRules->ItemShouldRespawn( this ))
+		Respawn();
+	else
+		UTIL_Remove( this );
+
+	return TRUE;
+}
+
+// heals sk_healthkit (skill.cfg: 75 / 50 / 50)
+class CArmorPlate : public CNightfireArmor
+{
+	void Spawn( void );
+	void Precache( void );
+	BOOL MyTouch( CBasePlayer *pPlayer ) { return GiveHealth( pPlayer, gSkillData.healthkitCapacity, "player/armor_shard.wav" ); }
+};
+
+LINK_ENTITY_TO_CLASS( item_armor_plate, CArmorPlate )
+
+void CArmorPlate::Precache( void )
+{
+	PRECACHE_MODEL( "models/w_armor_plate.mdl" );
+	PRECACHE_SOUND( "player/armor_shard.wav" );
+}
+
+void CArmorPlate::Spawn( void )
+{
+	Precache();
+	SET_MODEL( ENT( pev ), "models/w_armor_plate.mdl" );
+	CItem::Spawn();
+	UTIL_SetSize( pev, Vector( -10, -10, 0 ), Vector( 10, 10, 1 ));	// retail 0x42072de0
+}
+
+// heals to full (retail: TakeHealth( 200 - health ))
+class CArmorVest : public CNightfireArmor
+{
+	void Spawn( void );
+	void Precache( void );
+	BOOL MyTouch( CBasePlayer *pPlayer ) { return GiveHealth( pPlayer, pPlayer->pev->max_health - pPlayer->pev->health, "player/armor_vest.wav" ); }
+};
+
+LINK_ENTITY_TO_CLASS( item_armor_vest, CArmorVest )
+
+void CArmorVest::Precache( void )
+{
+	PRECACHE_MODEL( "models/w_armor_vest.mdl" );
+	PRECACHE_SOUND( "player/armor_vest.wav" );
+}
+
+void CArmorVest::Spawn( void )
+{
+	Precache();
+	SET_MODEL( ENT( pev ), "models/w_armor_vest.mdl" );
+	CItem::Spawn();
 }
