@@ -17,6 +17,12 @@ trigger_togglehud
 	clients: USE_OFF hides the HUD panels, USE_ON shows them, anything else
 	flips them; the activator does not matter. Here the state is kept per
 	player in m_iHideHUD (HIDEHUD_ALL) so it survives save/restore.
+
+trigger_playmovie
+	Retail CTriggerPlayMovie::Use (0x42011df0): "message" = movie name
+	(movies/<name>[.avi]); sends "PlayMovie" with the name to player 1, the
+	activator does not matter. The client hands it to the engine
+	(nf_playmovie), which plays it full-screen while the game waits.
 */
 
 #include "extdll.h"
@@ -144,4 +150,29 @@ void CTriggerToggleHud::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_
 			ALERT( at_console, "nf_debug: togglehud %s use %d -> hud %s\n",
 				STRING( pev->targetname ), (int)useType, hide ? "hidden" : "shown" );
 	}
+}
+
+class CTriggerPlayMovie : public CPointEntity
+{
+public:
+	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+};
+
+LINK_ENTITY_TO_CLASS( trigger_playmovie, CTriggerPlayMovie )
+
+void CTriggerPlayMovie::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
+{
+	if( FStringNull( pev->message ))
+		return;
+
+	CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
+	if( !pPlayer )
+		return;
+
+	MESSAGE_BEGIN( MSG_ONE, gmsgNFPlayMovie, NULL, pPlayer->pev );
+		WRITE_STRING( STRING( pev->message ));
+	MESSAGE_END();
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: playmovie %s \"%s\"\n", STRING( pev->targetname ), STRING( pev->message ));
 }

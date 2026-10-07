@@ -186,6 +186,7 @@ int gmsgStatusText = 0;
 int gmsgStatusValue = 0;
 
 int gmsgNFHudMsg = 0;
+int gmsgNFPlayMovie = 0;
 
 void LinkUserMessages( void )
 {
@@ -235,6 +236,9 @@ void LinkUserMessages( void )
 
 	// Nightfire trigger_hudmessage: title name, timed box, hint section, seconds
 	gmsgNFHudMsg = REG_USER_MSG( "HudMsg", -1 );
+
+	// Nightfire trigger_playmovie: movie name (retail size -1)
+	gmsgNFPlayMovie = REG_USER_MSG( "PlayMovie", -1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )

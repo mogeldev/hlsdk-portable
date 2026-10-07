@@ -447,6 +447,12 @@ LINK_ENTITY_TO_CLASS( worldspawn, CWorld )
 #define SF_WORLD_DARK		0x0001		// Fade from black at startup
 #define SF_WORLD_TITLE		0x0002		// Display game title at startup
 #define SF_WORLD_FORCETEAM	0x0004		// Force teams
+#define SF_WORLD_INTROMOVIE	0x0008		// Nightfire: play "intromovie" once the client has the level
+
+// Nightfire worldspawn "intromovie" (retail game.dll CWorld::KeyValue 0x420d4022):
+// only the map's KeyValue sets SF_WORLD_INTROMOVIE, so a restored save does not
+// replay the movie. The engine plays the cvar v_movie and clears it.
+static char g_szIntroMovie[64];
 
 extern DLL_GLOBAL BOOL		g_fGameOver;
 
@@ -635,6 +641,13 @@ void CWorld::Precache( void )
 
 	pev->spawnflags &= ~SF_WORLD_TITLE;		// g-cont. don't show logo after save\restore
 
+	if( pev->spawnflags & SF_WORLD_INTROMOVIE )
+		CVAR_SET_STRING( "v_movie", g_szIntroMovie );
+	else
+		CVAR_SET_STRING( "v_movie", "" );
+
+	pev->spawnflags &= ~SF_WORLD_INTROMOVIE;
+
 	if( pev->spawnflags & SF_WORLD_FORCETEAM )
 	{
 		CVAR_SET_FLOAT( "mp_defaultteam", 1.0f );
@@ -698,6 +711,16 @@ void CWorld::KeyValue( KeyValueData *pkvd )
 		if( atoi( pkvd->szValue ) )
 			pev->spawnflags |= SF_WORLD_TITLE;
 
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "intromovie" ) )
+	{
+		if( pkvd->szValue[0] )
+		{
+			strncpy( g_szIntroMovie, pkvd->szValue, sizeof( g_szIntroMovie ) - 1 );
+			g_szIntroMovie[sizeof( g_szIntroMovie ) - 1] = '\0';
+			pev->spawnflags |= SF_WORLD_INTROMOVIE;
+		}
 		pkvd->fHandled = TRUE;
 	}
 	else if( FStrEq( pkvd->szKeyName, "mapteams" ) )

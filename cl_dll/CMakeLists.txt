@@ -108,6 +108,7 @@ set (CLDLL_SOURCES
 	menu.cpp
 	message.cpp
 	nf_hudmsg.cpp
+	nf_movie.cpp
 	MOTD.cpp
 	parsemsg.cpp
 	../pm_shared/pm_debug.c

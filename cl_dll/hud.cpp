@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include "parsemsg.h"
 #include "nf_hudmsg.h"
+#include "nf_movie.h"
 #include "vgui_int.h"
 #include "vgui_TeamFortressViewport.h"
 
@@ -301,6 +302,7 @@ void CHud::Init( void )
 	HOOK_MESSAGE( SetFOV );
 	HOOK_MESSAGE( Concuss );
 	NF_HudMsgInit();
+	NF_MovieInit();
 
 	// TFFree CommandMenu
 	HOOK_COMMAND( "+commandmenu", OpenCommandMenu );
