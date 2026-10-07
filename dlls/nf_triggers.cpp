@@ -54,9 +54,9 @@ trigger_endgame
 	0x420108a0). Key "status": 0 (default) mission failed, 1 success
 	(m3_japan01, never fired), 2 game won (m9_space01 "endgame"). Status 1
 	and 2 play common/stinger.wav at the player (ambient, vol 1, attn
-	1.25); 2 also sets the retail cvars sv_newunit / sv_iamdone (not in
-	this port) and sends the engine command "CL_GameSuccess" (leave the
-	game, m9_outro). Status 0 = mission failed (retail CBondRules vtable
+	1.25); 2 also sets the retail cvars sv_newunit (not in this port) and
+	sv_iamdone = 1 (unlocks MISSION SELECT in the menu) and sends the engine
+	command "CL_GameSuccess" (leave the game, m9_outro). Status 0 = mission failed (retail CBondRules vtable
 	slot 29, 0x420c2900, and Think 0x420c2260): common/bond_death.wav at
 	the player (ambient, vol 1, attn 1.25), fade to black (5 s, hold 15 s),
 	the player loses all items (0x420a6b40), 10 s later a second fade
@@ -622,7 +622,12 @@ void CTriggerEndGame::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TY
 	UTIL_EmitAmbientSound( pPlayer->edict(), pPlayer->pev->origin, "common/stinger.wav", 1.0f, 1.25f, 0, PITCH_NORM );
 
 	if( m_iStatus == NF_ENDGAME_WON )
+	{
+		// retail: sv_iamdone 1 unlocks MISSION SELECT in the front end (the
+		// port's menu registers it as an archived cvar)
+		SERVER_COMMAND( "sv_iamdone 1\n" );
 		SERVER_COMMAND( "CL_GameSuccess\n" );
+	}
 }
 
 void CTriggerEndGame::MissionFailed( CBasePlayer *pPlayer )
