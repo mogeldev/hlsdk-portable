@@ -339,6 +339,24 @@ public:
 	int m_iNFBondMoments;
 	int m_iNFSecrets;
 
+	// mission stats for the end of mission score screen ("ScoreInfoS",
+	// dlls/nf_scoring.cpp; retail player +0xBFC..+0xC20); saved. Reset by
+	// Spawn (single player) and on a map with worldspawn "newunit"
+	int m_iNFShotsTaken;	// shots fired (one per FireBullets call)
+	int m_iNFShotsHit;	// of them hit a monster
+	int m_iNFTotalEnemies;	// enemies of the mission (counted at the map load)
+	int m_iNFNonLethal;	// enemies taken down by club / shock / paralyze damage
+	int m_iNFDamageTaken;	// health + armour lost
+	int m_iNFTotalMoments;	// level totals from env_scoring
+	int m_iNFTotalSecrets;
+	float m_flNFMissionStart;
+
+	void NFResetStats( void );
+	void NFSendScoreInfo( void );
+	// after a FireBullets: iHit 1 = a monster was hit, 2 = only something
+	// else that takes damage (the shot does not count), 0 = nothing
+	void NFCountShot( int iHit );
+
 	int m_iAutoWepSwitch;
 
 	Vector m_vecLastViewAngles;
@@ -351,6 +369,13 @@ public:
 
 extern int gmsgHudText;
 extern int gmsgNFHudMsg;
+extern int gmsgNFScoreInfoS;
+
+// set by worldspawn "newunit" / its Precache, used by the player (dlls/nf_scoring.cpp)
+extern BOOL g_fNFNewUnit;
+extern BOOL g_fNFCountEnemies;
+void NF_ScoringInitHUD( CBasePlayer *pPlayer );
+void NF_ScoringCountEnemies( CBasePlayer *pPlayer );
 extern int gmsgNFPlayMovie;
 extern int gmsgNFObjective;
 extern int gmsgNFSetHudIcon;

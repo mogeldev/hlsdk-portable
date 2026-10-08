@@ -43,12 +43,19 @@ by the engine fork as one-frame sprites) at their own pixel size, no scaling
 * Stinger (CStingerPanel, ctor 0x41044ad0, message "ShowStinger" from
   trigger_bondmoment, no data): 640_stinger.png (the 007 logo) at its own
   size in the top left corner for 5 s (think 0x41044a30), no fade.
+* Mission stats ("ScoreInfoS", hook 0x41049530 -> CSinglePlayerScoreboard
+  0x4104e3d0): only kept, for the mission score screen that the menu
+  (mainui ui_nf_missionscores) draws during the changelevel. The cvar
+  nf_scoreinfo holds "frags enemies nonlethal shots hits moments
+  totalmoments secrets totalsecrets time partime"; partime = titles.txt
+  PARTIME minutes * 60 (retail 0x4104e7e0, missing -> 1800 s).
 
 Without the images the port's text panels (hud_redraw.cpp) stay.
 */
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "hud.h"
 #include "cl_util.h"
@@ -294,6 +301,40 @@ static int __MsgFunc_ShowStinger( const char *pszName, int iSize, void *pbuf )
 	return 1;
 }
 
+static int __MsgFunc_ScoreInfoS( const char *pszName, int iSize, void *pbuf )
+{
+	char buf[128];
+	int frags, enemies, nonlethal, shots, hits, moments, totalMoments, secrets, totalSecrets;
+	float time, par = 0.0f;
+	client_textmessage_t *partime = gEngfuncs.pfnTextMessageGet( "PARTIME" );
+
+	BEGIN_READ( pbuf, iSize );
+	READ_BYTE();	// entindex
+	frags = READ_SHORT();
+	READ_SHORT();	// deaths, not shown
+	enemies = READ_SHORT();
+	nonlethal = READ_SHORT();
+	shots = READ_SHORT();
+	hits = READ_SHORT();
+	READ_SHORT();	// damage taken, not shown
+	READ_SHORT();	// favourite weapon, not shown
+	moments = READ_BYTE();
+	totalMoments = READ_BYTE();
+	secrets = READ_BYTE();
+	totalSecrets = READ_BYTE();
+	time = READ_FLOAT();
+
+	if( partime && partime->pMessage )
+		par = atoi( partime->pMessage ) * 60.0f;
+
+	snprintf( buf, sizeof( buf ), "%d %d %d %d %d %d %d %d %d %.1f %.0f", frags, enemies, nonlethal, shots, hits,
+		moments, totalMoments, secrets, totalSecrets, time, par );
+	gEngfuncs.Cvar_Set( "nf_scoreinfo", buf );
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		gEngfuncs.Con_Printf( "nf_debug: cl: scoreinfo %s\n", buf );
+	return 1;
+}
+
 static int __MsgFunc_Progress( const char *pszName, int iSize, void *pbuf )
 {
 	BEGIN_READ( pbuf, iSize );
@@ -321,6 +362,8 @@ void NF_HudInit( void )
 	HOOK_MESSAGE( SetHudIcon );
 	HOOK_MESSAGE( Progress );
 	HOOK_MESSAGE( ShowStinger );
+	HOOK_MESSAGE( ScoreInfoS );
+	gEngfuncs.pfnRegisterVariable( "nf_scoreinfo", "", 0 );
 }
 
 bool NF_HudActive( void )

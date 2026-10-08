@@ -77,6 +77,7 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "nodes.h"
 #include "nf_debug.h"
 #include "nf_aievent.h"
+#include "player.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
 #define NF_ENEMY_SPAWNFLAGS_HL	0x3FF
@@ -205,6 +206,7 @@ public:
 	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
 	void Killed( entvars_t *pevAttacker, int iGib );
+	void NFCountEnemy( CBaseEntity *pPlayer );
 	BOOL FOkToSpeak( void ) { return FALSE; }	// no HG_* sentence groups in Nightfire
 	Schedule_t *GetSchedule( void );
 	Schedule_t *GetScheduleOfType( int Type );
@@ -236,6 +238,10 @@ private:
 	Schedule_t *LeaveCover( void );
 	const char *CoverSequence( Activity act );
 	BOOL InCover( void ) { return m_fAIEventDone && m_iCoverID != NF_COVER_NONE && m_hAIEvent != 0; }
+
+	// mission stats (retail CBaseCharacter m_fCounted +0x3D5 / m_fDispatched +0x3D4)
+	BOOL m_fNFCounted;
+	BOOL m_fNFDispatched;
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -299,6 +305,8 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_iFirePhase, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_cCornerShots, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_flNextCoverFire, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireEnemy, m_fNFCounted, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_fNFDispatched, FIELD_BOOLEAN ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -823,7 +831,46 @@ int CNightfireEnemy::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker
 	if( NF_DEBUG( NF_DBG_MONSTERS ))
 		ALERT( at_console, "nf_debug: enemy '%s' takes %.1f damage (type 0x%x) from %s, health %.0f\n", STRING( pev->targetname ),
 			flDamage, bitsDamageType, pevInflictor ? STRING( pevInflictor->classname ) : "-", pev->health );
-	return CHGrunt::TakeDamage( pevInflictor, pevAttacker, flDamage, bitsDamageType );
+
+	BOOL fWasAlive = !HasMemory( bits_MEMORY_KILLED );
+	int ret = CHGrunt::TakeDamage( pevInflictor, pevAttacker, flDamage, bitsDamageType );
+
+	// mission stats (retail CBaseCharacter::TakeDamage 0x42043C30): a kill by
+	// club / shock / paralyze damage is a non-lethal takedown of the
+	// player, any other kill a frag of the killer (CBondRules::MonsterKilled).
+	// By the memory bit Killed sets (the death flag follows with the death
+	// animation, and BecomeDead gives the corpse health again)
+	if( fWasAlive && HasMemory( bits_MEMORY_KILLED ) && pevAttacker )
+	{
+		CBaseEntity *pAttacker = CBaseEntity::Instance( pevAttacker );
+		CBasePlayer *pPlayer = ( pAttacker && pAttacker->IsPlayer( )) ? (CBasePlayer *)pAttacker : NULL;
+
+		if( bitsDamageType & ( DMG_CLUB | DMG_SHOCK | DMG_PARALYZE ))
+		{
+			if( pPlayer && !m_fNFDispatched )
+				pPlayer->m_iNFNonLethal++;
+			m_fNFDispatched = TRUE;
+		}
+		else
+		{
+			pevAttacker->frags += 1;
+			if( pPlayer )
+				pPlayer->NFSendScoreInfo();
+		}
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' %s by %s\n", STRING( pev->targetname ),
+				( bitsDamageType & ( DMG_CLUB | DMG_SHOCK | DMG_PARALYZE )) ? "taken down" : "killed, a frag", STRING( pevAttacker->classname ));
+	}
+	return ret;
+}
+
+void CNightfireEnemy::NFCountEnemy( CBaseEntity *pPlayer )
+{
+	if( m_fNFCounted )
+		return;
+
+	m_fNFCounted = TRUE;
+	( (CBasePlayer *)pPlayer )->m_iNFTotalEnemies++;
 }
 
 Activity CNightfireEnemy::GetDeathActivity( void )

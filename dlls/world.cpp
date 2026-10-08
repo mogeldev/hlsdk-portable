@@ -469,6 +469,8 @@ void CWorld::Spawn( void )
 void CWorld::Precache( void )
 {
 	g_pLastSpawn = NULL;
+	// Nightfire: count the enemies at the first player update (retail 0x420D4786)
+	g_fNFCountEnemies = TRUE;
 #if 1
 	CVAR_SET_STRING( "sv_gravity", "800" ); // 67ft/sec
 	CVAR_SET_STRING( "sv_stepsize", "18" );
@@ -707,7 +709,11 @@ void CWorld::KeyValue( KeyValueData *pkvd )
 	{
 		// Single player only.  Clear save directory if set
 		if( atoi( pkvd->szValue ) )
+		{
 			CVAR_SET_FLOAT( "sv_newunit", 1 );
+			// Nightfire: the player starts new mission stats (retail 0x420D3F0E)
+			g_fNFNewUnit = TRUE;
+		}
 		pkvd->fHandled = TRUE;
 	}
 	else if( FStrEq(pkvd->szKeyName, "gametitle" ) )

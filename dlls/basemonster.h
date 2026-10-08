@@ -204,6 +204,10 @@ public:
 	void SetState( MONSTERSTATE State );
 	virtual void ReportAIState( void );
 
+	// Nightfire mission stats (retail CBaseCharacter slot 0x2AC): an enemy
+	// adds itself once to the player's total (dlls/nf_scoring.cpp)
+	virtual void NFCountEnemy( CBaseEntity *pPlayer ) { }
+
 	void CheckAttacks( CBaseEntity *pTarget, float flDist );
 	virtual int CheckEnemy( CBaseEntity *pEnemy );
 	void PushEnemy( CBaseEntity *pEnemy, Vector &vecLastKnownPos );

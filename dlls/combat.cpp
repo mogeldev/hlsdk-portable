@@ -30,6 +30,7 @@
 #include "weapons.h"
 #include "func_break.h"
 #include "game.h"
+#include "player.h"
 
 extern DLL_GLOBAL Vector		g_vecAttackDir;
 extern DLL_GLOBAL int			g_iSkillLevel;
@@ -1479,6 +1480,8 @@ Vector CBaseEntity::FireBulletsPlayer( ULONG cShots, Vector vecSrc, Vector vecDi
 	ClearMultiDamage();
 	gMultiDamage.type = DMG_BULLET | DMG_NEVERGIB;
 
+	int iNFHit = 0;	// Nightfire mission stats, see CBasePlayer::NFCountShot
+
 	for( ULONG iShot = 1; iShot <= cShots; iShot++ )
 	{
 		//Use player's random seed.
@@ -1501,6 +1504,11 @@ Vector CBaseEntity::FireBulletsPlayer( ULONG cShots, Vector vecSrc, Vector vecDi
 			CBaseEntity *pEntity = CBaseEntity::Instance( tr.pHit );
 
 			vecDir = vecDir.Normalize();
+
+			if( pEntity && pEntity->MyMonsterPointer( ))
+				iNFHit = 1;
+			else if( pEntity && pEntity->pev->takedamage != DAMAGE_NO && iNFHit == 0 )
+				iNFHit = 2;
 
 			if( iDamage )
 			{
@@ -1542,6 +1550,9 @@ Vector CBaseEntity::FireBulletsPlayer( ULONG cShots, Vector vecSrc, Vector vecDi
 		UTIL_BubbleTrail( vecSrc, tr.vecEndPos, (int)( ( flDistance * tr.flFraction ) / 64.0f ) );
 	}
 	ApplyMultiDamage( pev, pevAttacker );
+
+	if( IsPlayer( ))
+		( (CBasePlayer *)this )->NFCountShot( iNFHit );
 
 	return Vector( x * vecSpread.x, y * vecSpread.y, 0.0 );
 }

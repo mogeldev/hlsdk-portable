@@ -242,6 +242,7 @@ LINK_ENTITY_TO_CLASS( weapon_minigun, CNightfireMinigun )
 static void NF_FireBuckshot( CBasePlayer *pPlayer, int pellets, Vector vecSrc, Vector vecDirShooting, float spread, float range, float damage, int shared_rand )
 {
 	TraceResult tr;
+	int iHit = 0;	// mission stats, see CBasePlayer::NFCountShot
 
 	ClearMultiDamage();
 	gMultiDamage.type = DMG_BULLET | DMG_NEVERGIB;
@@ -262,12 +263,18 @@ static void NF_FireBuckshot( CBasePlayer *pPlayer, int pellets, Vector vecSrc, V
 			float f = 1.0f - tr.flFraction;
 			float flDamage = Q_max( damage * f * f, 1.0f );
 
+			if( pEntity && pEntity->MyMonsterPointer( ))
+				iHit = 1;
+			else if( pEntity && pEntity->pev->takedamage != DAMAGE_NO && iHit == 0 )
+				iHit = 2;
+
 			if( pEntity )
 				pEntity->TraceAttack( pPlayer->pev, flDamage, vecDir.Normalize(), &tr, DMG_BULLET | DMG_NEVERGIB );
 			// impact sound and decal: the client fire event (EV_FireNFGun)
 		}
 	}
 	ApplyMultiDamage( pPlayer->pev, pPlayer->pev );
+	pPlayer->NFCountShot( iHit );
 }
 #endif
 

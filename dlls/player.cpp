@@ -122,6 +122,14 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_flNFEquipTime, FIELD_TIME ),
 	DEFINE_FIELD( CBasePlayer, m_iNFBondMoments, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iNFSecrets, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFShotsTaken, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFShotsHit, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTotalEnemies, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFNonLethal, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFDamageTaken, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTotalMoments, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTotalSecrets, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_flNFMissionStart, FIELD_TIME ),
 
 	//DEFINE_FIELD( CBasePlayer, m_fDeadTime, FIELD_FLOAT ), // only used in multiplayer games
 	//DEFINE_FIELD( CBasePlayer, m_fGameHUDInitialized, FIELD_INTEGER ), // only used in multiplayer games
@@ -197,6 +205,7 @@ int gmsgNFObjective = 0;
 int gmsgNFSetHudIcon = 0;
 int gmsgNFProgress = 0;
 int gmsgNFShowStinger = 0;
+int gmsgNFScoreInfoS = 0;
 int gmsgNFFog = 0;
 
 void LinkUserMessages( void )
@@ -258,6 +267,7 @@ void LinkUserMessages( void )
 	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
 	gmsgNFProgress = REG_USER_MSG( "Progress", -1 );	// laser target bar: short entindex, coord max, byte visible
 	gmsgNFShowStinger = REG_USER_MSG( "ShowStinger", 0 );	// trigger_bondmoment: the 007 logo for 5 s
+	gmsgNFScoreInfoS = REG_USER_MSG( "ScoreInfoS", -1 );	// mission stats (dlls/nf_scoring.cpp)
 
 	// Nightfire env_fog: on, r, g, b, start, end; the same for water
 	gmsgNFFog = REG_USER_MSG( "Fog", 24 );
@@ -466,6 +476,7 @@ int CBasePlayer::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 	float flRatio;
 	float flBonus;
 	float flHealthPrev = pev->health;
+	float flArmorPrev = pev->armorvalue;
 
 	flBonus = ARMOR_BONUS;
 	flRatio = ARMOR_RATIO;
@@ -518,6 +529,10 @@ int CBasePlayer::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, fl
 	// this cast to INT is critical!!! If a player ends up with 0.5 health, the engine will get that
 	// as an int (zero) and think the player is dead! (this will incite a clientside screentilt, etc)
 	fTookDamage = CBaseMonster::TakeDamage( pevInflictor, pevAttacker, flDamage >= 0.0f ? floor(flDamage) : ceil(flDamage), bitsDamageType );
+
+	// Nightfire mission stats (retail 0x420A68DF): health and armour lost
+	m_iNFDamageTaken = (int)( m_iNFDamageTaken + ( flHealthPrev - pev->health ) + ( flArmorPrev - pev->armorvalue ) + 0.5f );
+	NFSendScoreInfo();
 
 	// reset damage time countdown for each type of time based damage player just sustained
 	{
@@ -3030,6 +3045,10 @@ void CBasePlayer::Spawn( void )
 
 	m_flNextChatTime = gpGlobals->time;
 
+	// Nightfire: a new game starts the mission stats
+	if( !g_pGameRules->IsMultiplayer( ))
+		NFResetStats();
+
 	SET_VIEW(edict(), edict());
 
 	g_pGameRules->PlayerSpawn( this );
@@ -3077,6 +3096,13 @@ void CBasePlayer::Precache( void )
 
 	if( gInitHUD )
 		m_fInitHUD = TRUE;
+
+	// Nightfire: a map with worldspawn "newunit" starts new mission stats
+	if( g_fNFNewUnit )
+	{
+		g_fNFNewUnit = FALSE;
+		NFResetStats();
+	}
 
 	pev->fov = m_iFOV;	// Vit_amiN: restore the FOV on level change or map/saved game load
 }
@@ -4033,6 +4059,10 @@ reflecting all of the HUD state info.
 */
 void CBasePlayer::UpdateClientData( void )
 {
+	// Nightfire: the enemies of a freshly loaded map count for the stats
+	if( g_fNFCountEnemies )
+		NF_ScoringCountEnemies( this );
+
 	if( m_fInitHUD )
 	{
 		m_fInitHUD = FALSE;
@@ -4073,6 +4103,9 @@ void CBasePlayer::UpdateClientData( void )
 
 		// Nightfire: the map fog (also switches the previous map's fog off)
 		NF_FogUpdateClient( this );
+
+		// Nightfire: level totals of env_scoring, mission stats
+		NF_ScoringInitHUD( this );
 
 		InitStatusBar();
 	}

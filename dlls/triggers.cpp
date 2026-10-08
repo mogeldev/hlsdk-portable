@@ -1500,6 +1500,18 @@ void CChangeLevel::ChangeLevelNow( CBaseEntity *pActivator )
 		return;
 	}
 
+	// Nightfire (retail 0x420076E0): spawnflag 8 ends the mission (the last
+	// changelevel of each mission): sv_newunit 1 makes the engine show the
+	// mission scores and clear the saves, the player starts new mission
+	// stats on the next map (dlls/nf_scoring.cpp)
+	if( FBitSet( pev->spawnflags, 8 ))
+	{
+		CVAR_SET_FLOAT( "sv_newunit", 1 );
+		g_fNFNewUnit = TRUE;
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: changelevel %s ends the mission\n", m_szMapName );
+	}
+
 	// Create an entity to fire the changetarget
 	if( m_changeTarget )
 	{
