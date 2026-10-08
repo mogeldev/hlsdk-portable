@@ -1258,8 +1258,11 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 	state->rendercolor.g	= (byte)ent->v.rendercolor.y;
 	state->rendercolor.b	= (byte)ent->v.rendercolor.z;
 
-	// Nightfire: laser targets keep their health here for the client's progress bar
+	// Nightfire: laser targets keep their health here for the client's progress bar;
+	// env_drawwater sends its wave height (fuser1) and tesselation (iuser1) to the
+	// engine's water renderer (retail engine.dll reads both from the client entity)
 	state->fuser1		= ent->v.fuser1;
+	state->iuser1		= ent->v.iuser1;
 
 	state->aiment = 0;
 	if( ent->v.aiment )
