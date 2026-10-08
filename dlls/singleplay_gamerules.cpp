@@ -24,6 +24,7 @@
 #include	"gamerules.h"
 #include	"skill.h"
 #include	"items.h"
+#include	"nf_debug.h"
 
 extern DLL_GLOBAL CGameRules	*g_pGameRules;
 extern DLL_GLOBAL BOOL	g_fGameOver;
@@ -236,6 +237,17 @@ void CHalfLifeRules::PlayerThink( CBasePlayer *pPlayer )
 		CBaseEntity *pEquip = NULL;
 		while(( pEquip = UTIL_FindEntityByClassname( pEquip, "game_player_equip" )))
 			pEquip->Touch( pPlayer );
+
+		if( !pPlayer->HasNamedPlayerItem( "weapon_watch" ))
+		{
+			int autoSwitch = pPlayer->m_iAutoWepSwitch;
+			pPlayer->m_iAutoWepSwitch = 0;
+			pPlayer->GiveNamedItem( "weapon_watch" );
+			pPlayer->m_iAutoWepSwitch = autoSwitch;
+			if( NF_DEBUG( NF_DBG_ITEMS ))
+				ALERT( at_console, "nf_debug: spawn equipment: laser watch %s for player %d\n",
+					pPlayer->HasNamedPlayerItem( "weapon_watch" ) ? "given" : "failed", pPlayer->entindex() );
+		}
 	}
 }
 
