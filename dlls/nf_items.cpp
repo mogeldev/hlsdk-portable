@@ -15,6 +15,8 @@ item_breakable - a prop that breaks when damaged (monitors, PCs, phones):
                  "damagedbody" (body after breaking; the prop stays),
                  "hitanim" / "posthitanim" (sequence on hit / after it),
                  "explosionscale", "material" (4 on all electronics: sparks).
+item_grappletarget - an item_generic the grapple hooks into (retail
+                 CGrappleTarget, docs/retail/grapple.md).
 item_armor_plate / item_armor_vest - health pickups (retail CArmorPlate /
                  CArmorVest, docs/retail/player.md *Armour pickups*).
 */
@@ -158,6 +160,30 @@ void CNightfireItem::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYP
 		ClearBits( pev->effects, EF_NODRAW );
 	else
 		SetBits( pev->effects, EF_NODRAW );
+}
+
+// item_grappletarget: what the grapple (dlls/nf_grapple.cpp) can hook into.
+// Retail CGrappleTarget (factory 0x42070290, docs/retail/grapple.md) is an
+// item_generic: models/grapple_point.mdl unless "model" is set, solid box
+// (-16 -16 0) - (16 16 16), animated in single player. Not ported: its
+// "fixedlight" pulsing between 120 and 255 (AnimateThink 0x4206ff60).
+class CNightfireGrappleTarget : public CNightfireItem
+{
+public:
+	void Spawn( void );
+	BOOL IsGrappleTarget( void ) { return TRUE; }
+};
+
+LINK_ENTITY_TO_CLASS( item_grappletarget, CNightfireGrappleTarget )
+
+void CNightfireGrappleTarget::Spawn( void )
+{
+	if( FStringNull( pev->model ) || !STRING( pev->model )[0] )
+		pev->model = MAKE_STRING( "models/grapple_point.mdl" );
+
+	CNightfireItem::Spawn();
+	pev->solid = SOLID_BBOX;
+	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 16 ));
 }
 
 class CNightfireBreakable : public CNightfireItem

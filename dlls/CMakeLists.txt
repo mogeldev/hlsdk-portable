@@ -118,6 +118,7 @@ set (SVDLL_SOURCES
 	nf_aievent.cpp
 	nf_lasertarget.cpp
 	nf_watch.cpp
+	nf_grapple.cpp
 	nf_scoring.cpp
 	nihilanth.cpp
 	nodes.cpp

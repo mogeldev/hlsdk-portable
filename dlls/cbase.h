@@ -202,6 +202,7 @@ public:
 	virtual BOOL IsSneaking( void ) { return FALSE; }
 	virtual BOOL IsAlive( void ) { return (pev->deadflag == DEAD_NO) && pev->health > 0; }
 	virtual BOOL IsBSPModel( void ) { return pev->solid == SOLID_BSP || pev->movetype == MOVETYPE_PUSHSTEP; }
+	virtual BOOL IsGrappleTarget( void ) { return FALSE; }	// Nightfire: item_grappletarget (dlls/nf_items.cpp)
 	virtual BOOL ReflectGauss( void ) { return ( IsBSPModel() && !pev->takedamage ); }
 	virtual BOOL HasTarget( string_t targetname ) { return FStrEq(STRING(targetname), STRING(pev->target) ); }
 	virtual BOOL IsInWorld( void );
