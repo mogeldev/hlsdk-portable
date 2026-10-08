@@ -334,6 +334,11 @@ public:
 	// client starts without one
 	int m_iNFHudIcon;
 
+	// Bond moments and secrets found (trigger_bondmoment / trigger_bondsecret,
+	// dlls/nf_scoring.cpp; retail player +0xC1C / +0xC14); saved
+	int m_iNFBondMoments;
+	int m_iNFSecrets;
+
 	int m_iAutoWepSwitch;
 
 	Vector m_vecLastViewAngles;

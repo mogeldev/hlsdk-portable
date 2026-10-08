@@ -120,6 +120,8 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_iHideHUD, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iFOV, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_flNFEquipTime, FIELD_TIME ),
+	DEFINE_FIELD( CBasePlayer, m_iNFBondMoments, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFSecrets, FIELD_INTEGER ),
 
 	//DEFINE_FIELD( CBasePlayer, m_fDeadTime, FIELD_FLOAT ), // only used in multiplayer games
 	//DEFINE_FIELD( CBasePlayer, m_fGameHUDInitialized, FIELD_INTEGER ), // only used in multiplayer games
@@ -194,6 +196,7 @@ int gmsgNFPlayMovie = 0;
 int gmsgNFObjective = 0;
 int gmsgNFSetHudIcon = 0;
 int gmsgNFProgress = 0;
+int gmsgNFShowStinger = 0;
 int gmsgNFFog = 0;
 
 void LinkUserMessages( void )
@@ -254,6 +257,7 @@ void LinkUserMessages( void )
 	// Nightfire HUD use icon (trigger_changelevelicon): 0 off, 2 level change
 	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
 	gmsgNFProgress = REG_USER_MSG( "Progress", -1 );	// laser target bar: short entindex, coord max, byte visible
+	gmsgNFShowStinger = REG_USER_MSG( "ShowStinger", 0 );	// trigger_bondmoment: the 007 logo for 5 s
 
 	// Nightfire env_fog: on, r, g, b, start, end; the same for water
 	gmsgNFFog = REG_USER_MSG( "Fog", 24 );

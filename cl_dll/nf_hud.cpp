@@ -40,6 +40,9 @@ by the engine fork as one-frame sprites) at their own pixel size, no scaling
   to value * width / max, value = the target entity's fuser1 (its health,
   layout 0x41043150: centred, 64 px above the bottom edge [assumed: of the
   image's bottom]); hidden only by byte 0.
+* Stinger (CStingerPanel, ctor 0x41044ad0, message "ShowStinger" from
+  trigger_bondmoment, no data): 640_stinger.png (the 007 logo) at its own
+  size in the top left corner for 5 s (think 0x41044a30), no fade.
 
 Without the images the port's text panels (hud_redraw.cpp) stay.
 */
@@ -125,6 +128,10 @@ static HSPRITE s_hProgressBack, s_hProgressFront;
 static int s_iProgressEnt;
 static float s_flProgressMax;
 static bool s_bProgress;
+
+// stinger (0x41044ad0): shown until this time
+static HSPRITE s_hStinger;
+static float s_flStingerEnd;
 
 // gui/hud/colors.txt (retail defaults if missing): 0 = team 0 base, 1 = team 1 base,
 // 2 = team 0 accent, 3 = team 1 accent
@@ -269,12 +276,22 @@ void NF_HudVidInit( void )
 
 	s_hProgressBack = SPR_Load( "gui/hud/640_progress_meter_back.png" );
 	s_hProgressFront = SPR_Load( "gui/hud/640_progress_meter_front.png" );
+	s_hStinger = SPR_Load( "gui/hud/640_stinger.png" );
 
 	s_bLoaded = s_hIrisCircle && s_hIris[0] && s_hAmmoCircle;
 	NF_LoadColors();
 	s_iFlashStep = 0;
 	s_iUseIcon = 0;	// retail: the level change sends 0
 	s_bProgress = false;
+	s_flStingerEnd = 0.0f;
+}
+
+static int __MsgFunc_ShowStinger( const char *pszName, int iSize, void *pbuf )
+{
+	s_flStingerEnd = gHUD.m_flTime + 5.0f;
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		gEngfuncs.Con_Printf( "nf_debug: cl: stinger shown\n" );
+	return 1;
 }
 
 static int __MsgFunc_Progress( const char *pszName, int iSize, void *pbuf )
@@ -303,6 +320,7 @@ void NF_HudInit( void )
 {
 	HOOK_MESSAGE( SetHudIcon );
 	HOOK_MESSAGE( Progress );
+	HOOK_MESSAGE( ShowStinger );
 }
 
 bool NF_HudActive( void )
@@ -428,4 +446,8 @@ void NF_HudDraw( float flTime )
 		if( fill > 0 )
 			NF_DrawImagePart( s_hProgressFront, ( ScreenWidth - fw ) / 2, y + ( h - fh ) / 2, fill, fh, 0.0f, 0.0f, frac, 1.0f, 1.0f );
 	}
+
+	// stinger, layout 0x41044a60: top left corner, own size
+	if( s_hStinger && flTime < s_flStingerEnd )
+		NF_DrawImage( s_hStinger, 0, 0, NF_SpriteW( s_hStinger ), NF_SpriteH( s_hStinger ), 1.0f );
 }
