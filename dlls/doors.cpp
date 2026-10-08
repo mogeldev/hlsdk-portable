@@ -24,6 +24,8 @@
 #include "doors.h"
 #include "game.h"
 #include "weapons.h"
+#include "animation.h"
+#include "nf_debug.h"
 
 extern void SetMovedir( entvars_t *ev );
 
@@ -264,10 +266,169 @@ touch or takedamage doors).
 */
 
 LINK_ENTITY_TO_CLASS( func_door, CBaseDoor )
+
 //
-// func_water - same as a door. 
+// Nightfire func_water (retail CBaseWater, docs/retail/water.md): a door
+// whose brush only gives the water contents; the visible surface is the
+// studio model "watermodel", drawn by an env_drawwater (retail
+// CBaseWaterDrawn) that the first think creates. Spawnflag 2: no model.
 //
-LINK_ENTITY_TO_CLASS( func_water, CBaseDoor )
+#define SF_NFWATER_NOMODEL	2
+
+class CNFWaterDrawn : public CBaseEntity
+{
+public:
+	void Spawn( void );
+	void Precache( void );
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+	float m_flWaveHeight;
+	int m_iTesselation;
+};
+
+LINK_ENTITY_TO_CLASS( env_drawwater, CNFWaterDrawn )
+
+TYPEDESCRIPTION CNFWaterDrawn::m_SaveData[] =
+{
+	DEFINE_FIELD( CNFWaterDrawn, m_flWaveHeight, FIELD_FLOAT ),
+	DEFINE_FIELD( CNFWaterDrawn, m_iTesselation, FIELD_INTEGER ),
+};
+
+IMPLEMENT_SAVERESTORE( CNFWaterDrawn, CBaseEntity )
+
+void CNFWaterDrawn::Precache( void )
+{
+	// the wave values travel in iuser1 / fuser1 (retail entvars +0x254 / +0x264)
+	pev->iuser1 = m_iTesselation;
+	pev->fuser1 = m_flWaveHeight;
+	PRECACHE_MODEL( STRING( pev->model ) );
+}
+
+void CNFWaterDrawn::Spawn( void )
+{
+	Precache();
+	SET_MODEL( ENT( pev ), STRING( pev->model ) );
+	pev->iuser1 = m_iTesselation;
+	pev->fuser1 = m_flWaveHeight;
+
+	// port: Xash gives studio models size 0, so the entity (origin 0 0 0)
+	// would be one point, mostly outside the level, and never pass the PVS;
+	// the model's sequence box is the water surface
+	Vector mins, maxs;
+	if( ExtractBbox( GET_MODEL_PTR( ENT( pev )), 0, mins, maxs ))
+		UTIL_SetSize( pev, mins, maxs );
+	UTIL_SetOrigin( pev, pev->origin );
+}
+
+class CNFWater : public CBaseDoor
+{
+public:
+	void Spawn( void );
+	void Precache( void );
+	void KeyValue( KeyValueData *pkvd );
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+	void EXPORT CreateWaterThink( void );
+
+	string_t m_iszWaterModel;
+	float m_flWaveHeight;	// not saved (retail): only needed until the think
+	int m_iTesselation;
+};
+
+LINK_ENTITY_TO_CLASS( func_water, CNFWater )
+
+TYPEDESCRIPTION CNFWater::m_SaveData[] =
+{
+	DEFINE_FIELD( CNFWater, m_iszWaterModel, FIELD_STRING ),
+};
+
+IMPLEMENT_SAVERESTORE( CNFWater, CBaseDoor )
+
+void CNFWater::KeyValue( KeyValueData *pkvd )
+{
+	// retail also takes "water_offset" (pev->view_ofs); no map uses it
+	if( FStrEq( pkvd->szKeyName, "WaveHeight" ) )
+	{
+		m_flWaveHeight = atof( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "tesselation" ) )
+	{
+		m_iTesselation = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "watermodel" ) )
+	{
+		if( pkvd->szValue[0] )
+			m_iszWaterModel = ALLOC_STRING( UTIL_VarArgs( "models/%s", pkvd->szValue ));
+		else
+			m_iszWaterModel = MAKE_STRING( "models/water/pond2.wat" );
+		pkvd->fHandled = TRUE;
+	}
+	else
+		CBaseDoor::KeyValue( pkvd );
+}
+
+void CNFWater::Precache( void )
+{
+	if( !FBitSet( pev->spawnflags, SF_NFWATER_NOMODEL ) && m_iszWaterModel )
+		PRECACHE_MODEL( STRING( m_iszWaterModel ));
+	CBaseDoor::Precache();
+}
+
+void CNFWater::Spawn( void )
+{
+	// all func_water have special contents (skin -3): CBaseDoor makes them
+	// SOLID_NOT and silent like retail
+	CBaseDoor::Spawn();
+	if( !FBitSet( pev->spawnflags, SF_NFWATER_NOMODEL ))
+		SetThink( &CNFWater::CreateWaterThink );
+	pev->nextthink = gpGlobals->time + 0.1f;
+}
+
+void CNFWater::CreateWaterThink( void )
+{
+	edict_t *pent = CREATE_NAMED_ENTITY( MAKE_STRING( "env_drawwater" ));
+	CNFWaterDrawn *pWater = pent ? (CNFWaterDrawn *)GET_PRIVATE( pent ) : NULL;
+
+	if( !pWater )
+	{
+		ALERT( at_console, "NULL Ent in Create!\n" );
+		return;
+	}
+
+	if( !m_iTesselation )
+		m_iTesselation = 32;
+	if( fabs( m_flWaveHeight - 3.2f ) <= 0.1f )	// the default of the maps (31 of 34)
+		m_flWaveHeight = 2.5f;
+
+	pWater->pev->solid = SOLID_NOT;
+	pWater->pev->owner = edict();
+	pWater->pev->origin = pev->origin;
+	pWater->pev->angles = pev->angles;
+	pWater->pev->model = m_iszWaterModel;
+	pWater->pev->rendermode = kRenderTransAlpha;
+	pWater->pev->renderamt = 255;
+	pWater->m_iTesselation = m_iTesselation;
+	pWater->m_flWaveHeight = m_flWaveHeight;
+
+	// the brush itself is no longer drawn
+	pev->rendermode = kRenderTransAlpha;
+	pev->renderamt = 0;
+
+	DispatchSpawn( pWater->edict() );
+
+	if( NF_DEBUG( NF_DBG_TRIGGERS ))
+		ALERT( at_console, "nf_debug: func_water %s draws %s (tesselation %d, wave height %g) box %.0f %.0f %.0f .. %.0f %.0f %.0f\n",
+			STRING( pev->model ), STRING( m_iszWaterModel ), m_iTesselation, m_flWaveHeight,
+			pWater->pev->absmin.x, pWater->pev->absmin.y, pWater->pev->absmin.z,
+			pWater->pev->absmax.x, pWater->pev->absmax.y, pWater->pev->absmax.z );
+	SetThink( NULL );
+}
 
 void CBaseDoor::Spawn()
 {
