@@ -116,6 +116,8 @@ set (SVDLL_SOURCES
 	nf_triggers.cpp
 	nf_env.cpp
 	nf_aievent.cpp
+	nf_lasertarget.cpp
+	nf_watch.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp

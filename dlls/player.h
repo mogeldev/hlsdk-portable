@@ -330,6 +330,10 @@ public:
 	// triggers (CHalfLifeRules::PlayerSpawn / PlayerThink); saved
 	float m_flNFEquipTime;
 
+	// use icon shown ("SetHudIcon", dlls/nf_lasertarget.cpp); not saved: the
+	// client starts without one
+	int m_iNFHudIcon;
+
 	int m_iAutoWepSwitch;
 
 	Vector m_vecLastViewAngles;
@@ -345,6 +349,7 @@ extern int gmsgNFHudMsg;
 extern int gmsgNFPlayMovie;
 extern int gmsgNFObjective;
 extern int gmsgNFSetHudIcon;
+extern int gmsgNFProgress;
 extern BOOL gInitHUD;
 
 #endif // PLAYER_H

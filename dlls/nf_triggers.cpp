@@ -88,6 +88,7 @@ trigger_changelevelicon
 #include "shake.h"
 #include "nf_debug.h"
 #include "nf_triggers.h"
+#include "nf_lasertarget.h"
 
 #define SF_HUDMESSAGE_TIMED	1
 #define SF_HUDMESSAGE_NOHINT	2
@@ -666,8 +667,6 @@ void CTriggerEndGame::QuitToMenuThink( void )
 	SERVER_COMMAND( "CL_QuitToMenu\n" );
 }
 
-#define NF_HUDICON_NONE		0
-#define NF_HUDICON_LEVELTRANS	2	// client 640_use_level_trans.png
 
 class CChangeLevelIcon : public CBaseToggle
 {
@@ -702,9 +701,7 @@ void CChangeLevelIcon::PlayerTouch( CBaseEntity *pOther )
 
 	if( !m_bShown )
 	{
-		MESSAGE_BEGIN( MSG_ONE, gmsgNFSetHudIcon, NULL, pOther->pev );
-			WRITE_BYTE( NF_HUDICON_LEVELTRANS );
-		MESSAGE_END();
+		NF_SetHudIcon( (CBasePlayer *)pOther, NF_HUDICON_LEVELTRANS );
 
 		m_bShown = TRUE;
 		m_hPlayer = pOther;
@@ -727,9 +724,7 @@ void CChangeLevelIcon::PlayerTouchThink( void )
 
 		if( pPlayer )
 		{
-			MESSAGE_BEGIN( MSG_ONE, gmsgNFSetHudIcon, NULL, pPlayer->pev );
-				WRITE_BYTE( NF_HUDICON_NONE );
-			MESSAGE_END();
+			NF_SetHudIcon( (CBasePlayer *)pPlayer, NF_HUDICON_NONE );
 		}
 
 		if( NF_DEBUG( NF_DBG_TRIGGERS ))

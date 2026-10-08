@@ -1258,6 +1258,9 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 	state->rendercolor.g	= (byte)ent->v.rendercolor.y;
 	state->rendercolor.b	= (byte)ent->v.rendercolor.z;
 
+	// Nightfire: laser targets keep their health here for the client's progress bar
+	state->fuser1		= ent->v.fuser1;
+
 	state->aiment = 0;
 	if( ent->v.aiment )
 	{

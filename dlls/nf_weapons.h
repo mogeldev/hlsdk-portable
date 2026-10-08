@@ -26,6 +26,7 @@ repo (mogeldev/nightfire-xash3d).
 #define NF_WEAPON_L96A1_WINTER	13
 #define NF_WEAPON_FLASHGRENADE	15
 #define NF_WEAPON_FRAGGRENADE	16
+#define NF_WEAPON_WATCH		21	// dlls/nf_watch.cpp (server only)
 #define WEAPON_NF_PP9		NF_WEAPON_PP9
 
 #define NF_PP9_MAX_CLIP		16	// retail GetItemInfo

@@ -38,6 +38,7 @@
 #include "hltv.h"
 #include "nf_triggers.h"
 #include "nf_env.h"
+#include "nf_lasertarget.h"
 
 // #define DUCKFIX
 
@@ -192,6 +193,7 @@ int gmsgNFHudMsg = 0;
 int gmsgNFPlayMovie = 0;
 int gmsgNFObjective = 0;
 int gmsgNFSetHudIcon = 0;
+int gmsgNFProgress = 0;
 int gmsgNFFog = 0;
 
 void LinkUserMessages( void )
@@ -251,6 +253,7 @@ void LinkUserMessages( void )
 
 	// Nightfire HUD use icon (trigger_changelevelicon): 0 off, 2 level change
 	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
+	gmsgNFProgress = REG_USER_MSG( "Progress", -1 );	// laser target bar: short entindex, coord max, byte visible
 
 	// Nightfire env_fog: on, r, g, b, start, end; the same for water
 	gmsgNFFog = REG_USER_MSG( "Fog", 24 );
@@ -2653,6 +2656,9 @@ void CBasePlayer::PostThink()
 
 	// do weapon stuff
 	ItemPostFrame();
+
+	// Nightfire: the use icon of what the player looks at (dlls/nf_lasertarget.cpp)
+	NF_UseIconThink( this );
 
 	// check to see if player landed hard enough to make a sound
 	// falling farther than half of the maximum safe distance, but not as far a max safe distance will

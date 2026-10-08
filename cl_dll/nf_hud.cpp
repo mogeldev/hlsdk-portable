@@ -32,8 +32,14 @@ by the engine fork as one-frame sprites) at their own pixel size, no scaling
 * Use icon (ctor 0x41040c40, setter 0x41040bf0, layout 0x41040b10; message
   "SetHudIcon", handler 0x41049d00): one byte, 0 hides, 1-5 show
   640_use / _use_level_trans / _use_pda / _use_qworm / _use_watch at their
-  own size, centred at the bottom edge. Only trigger_changelevelicon (2)
-  sends it here.
+  own size, centred at the bottom edge. Sent by trigger_changelevelicon (2)
+  and the server's view check (5 on a laser target, dlls/nf_lasertarget.cpp).
+* Progress bar (CProgressPanel 0x41043340, message "Progress", handler
+  0x41049b70 -> 0x41048ac0): short entindex, coord max, byte visible;
+  640_progress_meter_back.png with _front.png over it, filled from the left
+  to value * width / max, value = the target entity's fuser1 (its health,
+  layout 0x41043150: centred, 64 px above the bottom edge [assumed: of the
+  image's bottom]); hidden only by byte 0.
 
 Without the images the port's text panels (hud_redraw.cpp) stay.
 */
@@ -46,6 +52,7 @@ Without the images the port's text panels (hud_redraw.cpp) stay.
 #include "triangleapi.h"
 #include "parsemsg.h"
 #include "nf_hud.h"
+#include "nf_debug.h"
 
 enum
 {
@@ -112,6 +119,12 @@ static const char *s_useIcons[NF_USEICONS] =
 };
 static HSPRITE s_hUseIcon[NF_USEICONS];
 static int s_iUseIcon;
+
+// progress bar (0x41043340): laser target entity and its full value
+static HSPRITE s_hProgressBack, s_hProgressFront;
+static int s_iProgressEnt;
+static float s_flProgressMax;
+static bool s_bProgress;
 
 // gui/hud/colors.txt (retail defaults if missing): 0 = team 0 base, 1 = team 1 base,
 // 2 = team 0 accent, 3 = team 1 accent
@@ -254,10 +267,25 @@ void NF_HudVidInit( void )
 		s_hUseIcon[i] = SPR_Load( name );
 	}
 
+	s_hProgressBack = SPR_Load( "gui/hud/640_progress_meter_back.png" );
+	s_hProgressFront = SPR_Load( "gui/hud/640_progress_meter_front.png" );
+
 	s_bLoaded = s_hIrisCircle && s_hIris[0] && s_hAmmoCircle;
 	NF_LoadColors();
 	s_iFlashStep = 0;
 	s_iUseIcon = 0;	// retail: the level change sends 0
+	s_bProgress = false;
+}
+
+static int __MsgFunc_Progress( const char *pszName, int iSize, void *pbuf )
+{
+	BEGIN_READ( pbuf, iSize );
+	s_iProgressEnt = READ_SHORT();
+	s_flProgressMax = READ_COORD();
+	s_bProgress = READ_BYTE() != 0;
+	if( NF_DEBUG( NF_DBG_ITEMS ))
+		gEngfuncs.Con_Printf( "nf_debug: cl: progress ent %d max %.0f %s\n", s_iProgressEnt, s_flProgressMax, s_bProgress ? "shown" : "hidden" );
+	return 1;
 }
 
 static int __MsgFunc_SetHudIcon( const char *pszName, int iSize, void *pbuf )
@@ -274,6 +302,7 @@ static int __MsgFunc_SetHudIcon( const char *pszName, int iSize, void *pbuf )
 void NF_HudInit( void )
 {
 	HOOK_MESSAGE( SetHudIcon );
+	HOOK_MESSAGE( Progress );
 }
 
 bool NF_HudActive( void )
@@ -382,5 +411,21 @@ void NF_HudDraw( float flTime )
 	{
 		HSPRITE h = s_hUseIcon[s_iUseIcon];
 		NF_DrawCorner( h, ( ScreenWidth - NF_SpriteW( h )) / 2, ScreenHeight, s_white );
+	}
+
+	// progress bar, paint 0x410430b0: the front image cut to value / max
+	cl_entity_t *pTarget = s_bProgress ? gEngfuncs.GetEntityByIndex( s_iProgressEnt ) : NULL;
+	if( pTarget && s_hProgressBack && s_hProgressFront && s_flProgressMax > 0 )
+	{
+		int w = NF_SpriteW( s_hProgressBack ), h = NF_SpriteH( s_hProgressBack );
+		int x = ( ScreenWidth - w ) / 2, y = ScreenHeight - 64 - h;
+		NF_DrawImage( s_hProgressBack, x, y, w, h, 1.0f );
+
+		int fw = NF_SpriteW( s_hProgressFront ), fh = NF_SpriteH( s_hProgressFront );
+		float frac = pTarget->curstate.fuser1 / s_flProgressMax;
+		frac = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+		int fill = (int)( fw * frac );
+		if( fill > 0 )
+			NF_DrawImagePart( s_hProgressFront, ( ScreenWidth - fw ) / 2, y + ( h - fh ) / 2, fill, fh, 0.0f, 0.0f, frac, 1.0f, 1.0f );
 	}
 }
