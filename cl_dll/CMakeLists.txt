@@ -112,6 +112,7 @@ set (CLDLL_SOURCES
 	nf_hud.cpp
 	nf_hudmsg.cpp
 	nf_movie.cpp
+	nf_particles.cpp
 	MOTD.cpp
 	parsemsg.cpp
 	../pm_shared/pm_debug.c

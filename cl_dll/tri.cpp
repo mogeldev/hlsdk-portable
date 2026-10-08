@@ -17,6 +17,7 @@
 #include "cl_entity.h"
 #include "triangleapi.h"
 #include "nf_fog.h"
+#include "nf_particles.h"
 
 extern "C"
 {
@@ -114,6 +115,9 @@ Render any triangles with transparent rendermode needs here
 */
 void DLLEXPORT HUD_DrawTransparentTriangles( void )
 {
+	// Nightfire particle_emitter particles
+	NF_ParticlesRender();
+
 #if TEST_IT
 //	Draw_Triangles();
 #endif

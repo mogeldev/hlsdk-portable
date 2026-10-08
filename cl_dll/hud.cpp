@@ -27,6 +27,7 @@
 #include "nf_hud.h"
 #include "nf_movie.h"
 #include "nf_fog.h"
+#include "nf_particles.h"
 #include "vgui_int.h"
 #include "vgui_TeamFortressViewport.h"
 
@@ -307,6 +308,7 @@ void CHud::Init( void )
 	NF_MovieInit();
 	NF_HudInit();
 	NF_FogInit();
+	NF_ParticlesInit();
 
 	// TFFree CommandMenu
 	HOOK_COMMAND( "+commandmenu", OpenCommandMenu );
@@ -451,6 +453,7 @@ void CHud::VidInit( void )
 	NF_HudMsgReset();
 	NF_HudVidInit();
 	NF_FogVidInit();
+	NF_ParticlesVidInit();
 
 	// ----------
 	// Load Sprites

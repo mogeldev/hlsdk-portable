@@ -207,6 +207,7 @@ int gmsgNFProgress = 0;
 int gmsgNFShowStinger = 0;
 int gmsgNFScoreInfoS = 0;
 int gmsgNFFog = 0;
+int gmsgNFParticles = 0;
 
 void LinkUserMessages( void )
 {
@@ -271,6 +272,9 @@ void LinkUserMessages( void )
 
 	// Nightfire env_fog: on, r, g, b, start, end; the same for water
 	gmsgNFFog = REG_USER_MSG( "Fog", 24 );
+
+	// Nightfire particle_emitter burst (dlls/nf_particles.cpp, cl_dll/nf_particles.cpp)
+	gmsgNFParticles = REG_USER_MSG( "Particles", -1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )
