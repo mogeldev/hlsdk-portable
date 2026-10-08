@@ -21,6 +21,15 @@ The retail pool (0x41051000) holds 0xFFF70 / 0xB8 = 5698 particles; when it
 is full new particles are dropped. Spawnflags 2 / 4 ask for world collision,
 but the retail collision code (0x410569E0) only acts for flags the emitter
 never sets, so particles fly through walls there too.
+
+Port addition, not in retail: with nf_particle_clip 1 (default) a quad
+that crosses a wall in its own plane keeps its size but is faded by how far
+the wall cuts into it, and a particle whose centre is inside a brush is not
+drawn. The m6_escape07 elevator smoke grows to ~290 units and drifts
+sideways; unclipped its quads stuck out of the cabin and cut the walls with
+hard edges (user report 2026-10-08). Shrinking the quads instead hid the
+edges but made the smoke look too small. nf_particle_clip 0 draws them as
+retail does.
 */
 
 #include <math.h>
@@ -32,6 +41,9 @@ never sets, so particles fly through walls there too.
 #include "com_model.h"
 #include "triangleapi.h"
 #include "parsemsg.h"
+#include "event_api.h"
+#include "pm_defs.h"
+#include "pmtrace.h"
 #include "nf_particles.h"
 #include "nf_debug.h"
 
@@ -74,6 +86,7 @@ static nf_particle_t s_particles[NF_MAX_PARTICLES];
 static int s_iUsed;		// live particles
 static float s_flLastUpdate;
 static bool s_bFullReported;	// nf_debug: pool full printed once per map
+static cvar_t *nf_particle_clip;
 
 static nf_particle_t *NF_AllocParticle( void )
 {
@@ -211,6 +224,7 @@ static int __MsgFunc_Particles( const char *pszName, int iSize, void *pbuf )
 void NF_ParticlesInit( void )
 {
 	HOOK_MESSAGE( Particles );
+	nf_particle_clip = CVAR_CREATE( "nf_particle_clip", "1", FCVAR_ARCHIVE );
 }
 
 void NF_ParticlesVidInit( void )
@@ -269,11 +283,35 @@ static void NF_UpdateParticle( nf_particle_t *p, float time, float dt, float svG
 	p->vel[2] += g;
 }
 
-static void NF_DrawParticle( const nf_particle_t *p )
+// How far the quad stays clear of walls in its plane, 0 .. 1: point traces
+// from the centre to the four edge midpoints and the four corners, the
+// smallest fraction. 0 when the centre is inside a brush.
+static float NF_ClipParticle( const nf_particle_t *p, const vec3_t right, const vec3_t up, float h )
 {
-	if( !gEngfuncs.pTriAPI->SpriteTexture( p->model, p->frame ))
-		return;
+	vec3_t org = p->org;
+	if( gEngfuncs.PM_PointContents( org, NULL ) == CONTENTS_SOLID )
+		return 0.0f;
 
+	static const float dirs[8][2] = {
+		{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+	};
+	float frac = 1.0f;
+	for( int i = 0; i < 8; i++ )
+	{
+		vec3_t end;
+		for( int k = 0; k < 3; k++ )
+			end[k] = org[k] + ( right[k] * dirs[i][0] + up[k] * dirs[i][1] ) * h;
+
+		pmtrace_t tr;
+		gEngfuncs.pEventAPI->EV_PlayerTrace( org, end, PM_STUDIO_IGNORE, -1, &tr );
+		if( tr.fraction < frac )
+			frac = tr.fraction;
+	}
+	return frac;
+}
+
+static void NF_DrawParticle( const nf_particle_t *p, bool clip )
+{
 	vec3_t angles, forward, right, up;
 	angles[0] = v_angles[0];
 	angles[1] = v_angles[1];
@@ -281,7 +319,14 @@ static void NF_DrawParticle( const nf_particle_t *p )
 	AngleVectors( angles, forward, right, up );
 
 	float h = p->scale * 0.5f;
+	float fade = clip ? NF_ClipParticle( p, right, up, h ) : 1.0f;
+	if( fade <= 0.0f )
+		return;
+
+	if( !gEngfuncs.pTriAPI->SpriteTexture( p->model, p->frame ))
+		return;
 	float alpha = p->alpha > 255.0f ? 255.0f : ( p->alpha < 0.0f ? 0.0f : p->alpha );
+	alpha *= fade;
 
 	gEngfuncs.pTriAPI->RenderMode( p->rendermode );
 	gEngfuncs.pTriAPI->Color4ub( p->color[0], p->color[1], p->color[2], (unsigned char)alpha );
@@ -327,12 +372,24 @@ void NF_ParticlesRender( void )
 		}
 	}
 
+	bool clip = nf_particle_clip && nf_particle_clip->value != 0.0f;
+	if( clip )
+	{
+		// world and brush entities, no players
+		gEngfuncs.pEventAPI->EV_SetUpPlayerPrediction( false, false );
+		gEngfuncs.pEventAPI->EV_PushPMStates();
+		gEngfuncs.pEventAPI->EV_SetTraceHull( 2 );
+	}
+
 	gEngfuncs.pTriAPI->CullFace( TRI_NONE );
 	for( int i = 0; i < NF_MAX_PARTICLES; i++ )
 	{
 		if( s_particles[i].used && time < s_particles[i].die )
-			NF_DrawParticle( &s_particles[i] );
+			NF_DrawParticle( &s_particles[i], clip );
 	}
 	gEngfuncs.pTriAPI->RenderMode( kRenderNormal );
 	gEngfuncs.pTriAPI->CullFace( TRI_FRONT );
+
+	if( clip )
+		gEngfuncs.pEventAPI->EV_PopPMStates();
 }
