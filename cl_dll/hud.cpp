@@ -349,7 +349,10 @@ void CHud::Init( void )
 
 	CVAR_CREATE( "zoom_sensitivity_ratio", "1.2", FCVAR_ARCHIVE );
 	CVAR_CREATE( "cl_autowepswitch", "1", FCVAR_ARCHIVE | FCVAR_USERINFO );
-	default_fov = CVAR_CREATE( "default_fov", "90", FCVAR_ARCHIVE );
+	// Nightfire: retail client.dll registers the view FOV as
+	// "default_fov_dontchange" "76" (0x4104B288; engine help text
+	// "76 = Normal 90 = Wide"), so old configs with default_fov 90 do not apply
+	default_fov = CVAR_CREATE( "default_fov_dontchange", "76", 0 );
 	m_pCvarStealMouse = CVAR_CREATE( "hud_capturemouse", "1", FCVAR_ARCHIVE );
 	m_pCvarDraw = CVAR_CREATE( "hud_draw", "1", FCVAR_ARCHIVE );
 #if HD_HUD_DEFAULT
