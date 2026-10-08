@@ -208,6 +208,8 @@ int gmsgNFShowStinger = 0;
 int gmsgNFScoreInfoS = 0;
 int gmsgNFFog = 0;
 int gmsgNFParticles = 0;
+int gmsgNFRainInfo = 0;
+int gmsgNFRainZone = 0;
 
 void LinkUserMessages( void )
 {
@@ -275,6 +277,8 @@ void LinkUserMessages( void )
 
 	// Nightfire particle_emitter burst (dlls/nf_particles.cpp, cl_dll/nf_particles.cpp)
 	gmsgNFParticles = REG_USER_MSG( "Particles", -1 );
+	gmsgNFRainInfo = REG_USER_MSG( "RainInfo", 11 );
+	gmsgNFRainZone = REG_USER_MSG( "RainZone", -1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )
@@ -4108,6 +4112,7 @@ void CBasePlayer::UpdateClientData( void )
 		// Nightfire: the map fog (also switches the previous map's fog off)
 		NF_FogUpdateClient( this );
 		NF_EntityLightsUpdateClient( this );
+		NF_RainUpdateClient( this );
 
 		// Nightfire: level totals of env_scoring, mission stats
 		NF_ScoringInitHUD( this );

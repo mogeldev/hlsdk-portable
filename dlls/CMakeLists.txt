@@ -121,6 +121,7 @@ set (SVDLL_SOURCES
 	nf_grapple.cpp
 	nf_pda.cpp
 	nf_particles.cpp
+	nf_rain.cpp
 	nf_scoring.cpp
 	nihilanth.cpp
 	nodes.cpp

@@ -18,6 +18,7 @@
 #include "triangleapi.h"
 #include "nf_fog.h"
 #include "nf_particles.h"
+#include "nf_rain.h"
 
 extern "C"
 {
@@ -117,6 +118,7 @@ void DLLEXPORT HUD_DrawTransparentTriangles( void )
 {
 	// Nightfire particle_emitter particles
 	NF_ParticlesRender();
+	NF_RainRender();
 
 #if TEST_IT
 //	Draw_Triangles();
