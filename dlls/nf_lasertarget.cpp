@@ -12,9 +12,9 @@ breakbody / breakskin and is removed (spawnflag 2: kept). Retail CLaserTarget
 
 Keys: model (default models/padlock.mdl), health (default 60), target,
 breaksound (default misc/padlock.wav), breakbody, breakskin; spawnflags 1
-drop to the floor, 2 keep after breaking. fixedlight / Effects 256 (the
-retail model light colour) are not supported by the engine: the glow is a
-red glow shell here [assumed look].
+drop to the floor, 2 keep after breaking. fixedlight / Effects 256
+(EF_FIXEDLIGHT, the model light floor) are plain entvars; the glow is the
+retail fixedlight heat-up with EF_FIXEDLIGHT set while it lasts.
 
 The player's use icon (retail 0x420c2d50): every frame a 96-unit trace
 along the view; an entity that has one shows its icon ("SetHudIcon": 5 =
@@ -52,7 +52,9 @@ public:
 	int m_nBreakBody;
 	int m_nBreakSkin;
 	float m_flLastHealth;
-	int m_nGlow;			// red glow 0..255 (retail: fixedlight tint)
+	int m_nPrevEffects;		// retail +0xFC: effects before the glow
+	Vector m_vecPrevFixedLight;	// retail +0x100: fixedlight before the glow
+	BOOL m_fGlowing;
 	BOOL m_fProgressVisible;
 	BOOL m_fBroken;
 };
@@ -63,7 +65,9 @@ TYPEDESCRIPTION CLaserTarget::m_SaveData[] =
 	DEFINE_FIELD( CLaserTarget, m_nBreakBody, FIELD_INTEGER ),
 	DEFINE_FIELD( CLaserTarget, m_nBreakSkin, FIELD_INTEGER ),
 	DEFINE_FIELD( CLaserTarget, m_flLastHealth, FIELD_FLOAT ),
-	DEFINE_FIELD( CLaserTarget, m_nGlow, FIELD_INTEGER ),
+	DEFINE_FIELD( CLaserTarget, m_nPrevEffects, FIELD_INTEGER ),
+	DEFINE_FIELD( CLaserTarget, m_vecPrevFixedLight, FIELD_VECTOR ),
+	DEFINE_FIELD( CLaserTarget, m_fGlowing, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CLaserTarget, m_fProgressVisible, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CLaserTarget, m_fBroken, FIELD_BOOLEAN ),
 };
@@ -90,10 +94,6 @@ void CLaserTarget::KeyValue( KeyValueData *pkvd )
 		m_nBreakSkin = atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
-	else if( FStrEq( pkvd->szKeyName, "fixedlight" ))
-	{
-		pkvd->fHandled = TRUE;	// retail model light colour, not supported
-	}
 	else
 		CBaseToggle::KeyValue( pkvd );
 }
@@ -115,7 +115,6 @@ void CLaserTarget::Spawn( void )
 	pev->solid = SOLID_BBOX;
 	pev->movetype = MOVETYPE_NONE;
 	pev->frame = 0;
-	pev->effects &= ~256;	// Effects 256 = retail fixedlight model light [assumed]; EF_NIGHTVISION here
 	pev->takedamage = DAMAGE_NO;	// only the watch laser takes health
 	SET_MODEL( ENT( pev ), STRING( pev->model ));
 	if( FClassnameIs( pev, "item_padlock" ))
@@ -174,7 +173,17 @@ void CLaserTarget::BreakThink( void )
 		// lasered since the last tick: progress bar, glow up
 		if( !m_fProgressVisible )
 			ShowProgress( TRUE );
-		m_nGlow = Q_min( m_nGlow + 25, 255 );
+		if( !m_fGlowing )
+		{
+			m_nPrevEffects = pev->effects;
+			m_vecPrevFixedLight = pev->fixedlight;
+			pev->effects |= EF_FIXEDLIGHT;
+			m_fGlowing = TRUE;
+		}
+		// heats up to red (retail 0x42079aa0)
+		pev->fixedlight.x = Q_min( pev->fixedlight.x + 25, 255 );
+		pev->fixedlight.y = Q_max( pev->fixedlight.y - 25, 0 );
+		pev->fixedlight.z = Q_max( pev->fixedlight.z - 25, 0 );
 		m_flLastHealth = pev->health;
 		pev->fuser1 = pev->health;	// the client's bar reads it
 	}
@@ -182,17 +191,18 @@ void CLaserTarget::BreakThink( void )
 	{
 		if( m_fProgressVisible )
 			ShowProgress( FALSE );
-		m_nGlow = Q_max( m_nGlow - 10, 0 );
+		if( m_fGlowing )
+		{
+			pev->fixedlight.x = Q_max( pev->fixedlight.x - 10, m_vecPrevFixedLight.x );
+			pev->fixedlight.y = Q_min( pev->fixedlight.y + 10, m_vecPrevFixedLight.y );
+			pev->fixedlight.z = Q_min( pev->fixedlight.z + 10, m_vecPrevFixedLight.z );
+			if( pev->fixedlight == m_vecPrevFixedLight )
+			{
+				pev->effects = m_nPrevEffects;
+				m_fGlowing = FALSE;
+			}
+		}
 	}
-
-	if( m_nGlow > 0 )
-	{
-		pev->renderfx = kRenderFxGlowShell;
-		pev->rendercolor = Vector( m_nGlow, 0, 0 );
-		pev->renderamt = 1;
-	}
-	else
-		pev->renderfx = kRenderFxNone;
 
 	if( pev->health >= 1 )
 		return;
@@ -209,7 +219,6 @@ void CLaserTarget::BreakThink( void )
 		pev->skin = m_nBreakSkin;
 	if( m_fProgressVisible )
 		ShowProgress( FALSE );
-	pev->renderfx = kRenderFxNone;
 
 	if( FBitSet( pev->spawnflags, SF_LASERTARGET_KEEP ))
 		SetThink( NULL );

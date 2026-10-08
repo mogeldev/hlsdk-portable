@@ -112,6 +112,7 @@
 #define EF_LIGHT			64	// rocket flare glow sprite
 #define EF_NODRAW			128	// don't draw entity
 #define EF_NIGHTVISION			256	// player nightvision
+#define EF_FIXEDLIGHT			256	// Nightfire: the entity's fixedlight is its model light floor
 #define EF_SNIPERLASER			512	// sniper laser effect
 #define EF_FIBERCAMERA			1024	// fiber camera
 

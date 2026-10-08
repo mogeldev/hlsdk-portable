@@ -1257,6 +1257,9 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 	state->rendercolor.r	= (byte)ent->v.rendercolor.x;
 	state->rendercolor.g	= (byte)ent->v.rendercolor.y;
 	state->rendercolor.b	= (byte)ent->v.rendercolor.z;
+	state->fixedlight.r	= (byte)ent->v.fixedlight.x;
+	state->fixedlight.g	= (byte)ent->v.fixedlight.y;
+	state->fixedlight.b	= (byte)ent->v.fixedlight.z;
 
 	// Nightfire: laser targets keep their health here for the client's progress bar;
 	// env_drawwater sends its wave height (fuser1) and tesselation (iuser1) to the
@@ -1349,6 +1352,9 @@ void CreateBaseline( int player, int eindex, struct entity_state_s *baseline, st
 	baseline->rendercolor.r		= (byte)entity->v.rendercolor.x;
 	baseline->rendercolor.g		= (byte)entity->v.rendercolor.y;
 	baseline->rendercolor.b		= (byte)entity->v.rendercolor.z;
+	baseline->fixedlight.r		= (byte)entity->v.fixedlight.x;
+	baseline->fixedlight.g		= (byte)entity->v.fixedlight.y;
+	baseline->fixedlight.b		= (byte)entity->v.fixedlight.z;
 	baseline->renderfx		= (byte)entity->v.renderfx;
 
 	if( player )

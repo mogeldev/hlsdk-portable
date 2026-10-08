@@ -306,6 +306,7 @@ TYPEDESCRIPTION	gEntvarsDescription[] =
 	DEFINE_ENTITY_FIELD( air_finished, FIELD_TIME ),
 	DEFINE_ENTITY_FIELD( pain_finished, FIELD_TIME ),
 	DEFINE_ENTITY_FIELD( radsuit_finished, FIELD_TIME ),
+	DEFINE_ENTITY_FIELD( fixedlight, FIELD_VECTOR ),
 };
 
 #define ENTVARS_COUNT		( sizeof(gEntvarsDescription) / sizeof(gEntvarsDescription[0]) )

@@ -505,7 +505,7 @@ void CNightfireEnemy::Spawn( void )
 	pev->solid = SOLID_SLIDEBOX;
 	pev->movetype = MOVETYPE_STEP;
 	m_bloodColor = BLOOD_COLOR_RED;
-	pev->effects = 0;
+	pev->effects &= EF_FIXEDLIGHT;	// the map's fixedlight flag stays [assumed: retail keeps the key value]
 	if( pev->health <= 0 )
 		pev->health = NF_SkillValue( "sk_enemy_health" );
 	if( pev->health <= 0 )

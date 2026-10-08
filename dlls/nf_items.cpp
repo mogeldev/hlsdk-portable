@@ -9,7 +9,9 @@ item_generic   - a studio-model prop (pipes, spotlights, servers, monitors):
                  m5/m7), render keys; "usebody" = body to switch to when
                  triggered (otherwise triggering toggles visibility);
                  "minbbox"/"maxbbox" = collision box ("0 0 0" = not solid).
-                 Not handled: "fixedlight", "Effects", "gibmodel".
+                 "fixedlight" (RGB) and "Effects" 256 (EF_FIXEDLIGHT) are plain
+                 entvars: the engine uses them as the model light floor.
+                 Not handled: "gibmodel".
 item_breakable - a prop that breaks when damaged (monitors, PCs, phones):
                  "max_health", "gibmodel" (debris, "none" = no debris),
                  "damagedbody" (body after breaking; the prop stays),
@@ -166,13 +168,31 @@ void CNightfireItem::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYP
 // Retail CGrappleTarget (factory 0x42070290, docs/retail/grapple.md) is an
 // item_generic: models/grapple_point.mdl unless "model" is set, solid box
 // (-16 -16 0) - (16 16 16), animated in single player. Not ported: its
-// "fixedlight" pulsing between 120 and 255 (AnimateThink 0x4206ff60).
+// "fixedlight" pulsing between 120 and 255 (AnimateThink 0x4206ff60, single
+// player only; Spawn 0x42070140 sets effect 0x100 = EF_FIXEDLIGHT).
 class CNightfireGrappleTarget : public CNightfireItem
 {
 public:
 	void Spawn( void );
 	BOOL IsGrappleTarget( void ) { return TRUE; }
+	void EXPORT PulseThink( void );
+
+	virtual int Save( CSave &save );
+	virtual int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+
+private:
+	float m_flLevel;	// retail +0xF8: the grey level of fixedlight
+	int m_iStep;		// retail +0x104: +1 / -1
 };
+
+TYPEDESCRIPTION CNightfireGrappleTarget::m_SaveData[] =
+{
+	DEFINE_FIELD( CNightfireGrappleTarget, m_flLevel, FIELD_FLOAT ),
+	DEFINE_FIELD( CNightfireGrappleTarget, m_iStep, FIELD_INTEGER ),
+};
+
+IMPLEMENT_SAVERESTORE( CNightfireGrappleTarget, CNightfireItem )
 
 LINK_ENTITY_TO_CLASS( item_grappletarget, CNightfireGrappleTarget )
 
@@ -184,6 +204,29 @@ void CNightfireGrappleTarget::Spawn( void )
 	CNightfireItem::Spawn();
 	pev->solid = SOLID_BBOX;
 	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 16 ));
+
+	pev->effects |= EF_FIXEDLIGHT;
+	m_flLevel = pev->fixedlight.x;
+	m_iStep = 1;
+	if( !g_pGameRules->IsMultiplayer())
+	{
+		SetThink( &CNightfireGrappleTarget::PulseThink );
+		pev->nextthink = gpGlobals->time + 0.1f;
+	}
+}
+
+// retail AnimateThink 0x4206ff60: 120 <-> 255 in steps of 5, all channels equal
+void CNightfireGrappleTarget::PulseThink( void )
+{
+	pev->nextthink = gpGlobals->time + 0.1f;
+
+	if( m_flLevel >= 255.0f )
+		m_iStep = -1;
+	else if( m_flLevel <= 120.0f )
+		m_iStep = 1;
+
+	m_flLevel += m_iStep * 5;
+	pev->fixedlight = Vector( m_flLevel, m_flLevel, m_flLevel );
 }
 
 class CNightfireBreakable : public CNightfireItem
