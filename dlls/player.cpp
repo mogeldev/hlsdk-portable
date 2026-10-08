@@ -4107,6 +4107,7 @@ void CBasePlayer::UpdateClientData( void )
 
 		// Nightfire: the map fog (also switches the previous map's fog off)
 		NF_FogUpdateClient( this );
+		NF_EntityLightsUpdateClient( this );
 
 		// Nightfire: level totals of env_scoring, mission stats
 		NF_ScoringInitHUD( this );

@@ -23,6 +23,11 @@
 #include "extdll.h"
 #include "util.h"
 #include "cbase.h"
+#include "player.h"
+#include "nf_env.h"
+#include "nf_debug.h"
+
+#define SF_NF_ENTITY_LIGHT 2
 
 class CLight : public CPointEntity
 {
@@ -30,6 +35,9 @@ public:
 	virtual void KeyValue( KeyValueData* pkvd ); 
 	virtual void Spawn( void );
 	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+	void EXPORT EntityLightThink( void );
+	void SendEntityLight( CBasePlayer *pPlayer = NULL );
+	BOOL HasEntityLight( void ) { return m_bNFEntityLight; }
 
 	virtual int Save( CSave &save );
 	virtual int Restore( CRestore &restore );
@@ -39,14 +47,21 @@ public:
 private:
 	int m_iStyle;
 	string_t m_iszPattern;
+	Vector m_vecNFColor;
+	int m_iNFRadius;
+	BOOL m_bNFEntityLight;
 };
 
 LINK_ENTITY_TO_CLASS( light, CLight )
+LINK_ENTITY_TO_CLASS( entity_light, CLight )
 
 TYPEDESCRIPTION	CLight::m_SaveData[] =
 {
 	DEFINE_FIELD( CLight, m_iStyle, FIELD_INTEGER ),
 	DEFINE_FIELD( CLight, m_iszPattern, FIELD_STRING ),
+	DEFINE_FIELD( CLight, m_vecNFColor, FIELD_VECTOR ),
+	DEFINE_FIELD( CLight, m_iNFRadius, FIELD_INTEGER ),
+	DEFINE_FIELD( CLight, m_bNFEntityLight, FIELD_BOOLEAN ),
 };
 
 IMPLEMENT_SAVERESTORE( CLight, CPointEntity )
@@ -71,6 +86,17 @@ void CLight::KeyValue( KeyValueData* pkvd )
 		m_iszPattern = ALLOC_STRING( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
+	else if( FStrEq( pkvd->szKeyName, "_light" ))
+	{
+		int r = 0, g = 0, b = 0, radius = 0;
+		int count = sscanf( pkvd->szValue, "%d %d %d %d", &r, &g, &b, &radius );
+		if( count == 1 ) g = b = r;
+		// Retail uses colour bytes and caps the coord radius at 250.
+		// Keep malformed inputs defined instead of copying its uninitialised radius.
+		m_vecNFColor = Vector( (byte)r, (byte)g, (byte)b );
+		m_iNFRadius = radius < 0 ? 0 : (radius > 250 ? 250 : radius);
+		pkvd->fHandled = TRUE;
+	}
 	else
 	{
 		CPointEntity::KeyValue( pkvd );
@@ -86,8 +112,20 @@ If targeted, it will toggle between on or off.
 
 void CLight::Spawn( void )
 {
+	m_bNFEntityLight = FBitSet( pev->spawnflags, SF_NF_ENTITY_LIGHT ) &&
+		!FBitSet( pev->spawnflags, SF_LIGHT_START_OFF );
+	if( m_bNFEntityLight )
+	{
+		SetThink( &CLight::EntityLightThink );
+		pev->nextthink = gpGlobals->time + 10.0f;
+		if( NF_DEBUG( NF_DBG_EFFECTS ))
+			ALERT( at_console, "nf_debug: entity_light %d '%s' starts on radius %d color %.0f %.0f %.0f\n",
+				entindex(), STRING( pev->targetname ), m_iNFRadius,
+				m_vecNFColor.x, m_vecNFColor.y, m_vecNFColor.z );
+	}
 	if( FStringNull( pev->targetname ) )
 	{
+		if( m_bNFEntityLight ) return;
 		// inert light
 		REMOVE_ENTITY(ENT( pev ) );
 		return;
@@ -103,6 +141,61 @@ void CLight::Spawn( void )
 		else
 			LIGHT_STYLE( m_iStyle, "m" );
 	}
+}
+
+void CLight::SendEntityLight( CBasePlayer *pPlayer )
+{
+	// A stable key replaces this light on HUD init / reconnect instead of
+	// allocating duplicate ten-second lights. Its index belongs to this
+	// point entity, so it cannot attach to a studio model in the renderer.
+	if( pPlayer )
+		MESSAGE_BEGIN( MSG_ONE, SVC_TEMPENTITY, NULL, pPlayer->pev );
+	else
+		MESSAGE_BEGIN( MSG_ALL, SVC_TEMPENTITY );
+		WRITE_BYTE( TE_ELIGHT );
+		WRITE_SHORT( entindex() );
+		WRITE_COORD( pev->origin.x );
+		WRITE_COORD( pev->origin.y );
+		WRITE_COORD( pev->origin.z );
+		WRITE_COORD( m_iNFRadius );
+		WRITE_BYTE( (int)m_vecNFColor.x );
+		WRITE_BYTE( (int)m_vecNFColor.y );
+		WRITE_BYTE( (int)m_vecNFColor.z );
+		WRITE_BYTE( 100 );
+		WRITE_COORD( 0 );
+	MESSAGE_END();
+	if( NF_DEBUG( NF_DBG_EFFECTS ) && !FStringNull( pev->targetname ))
+		ALERT( at_console, "nf_debug: entity_light '%s' sent radius %d color %.0f %.0f %.0f (%s)\n",
+			STRING( pev->targetname ), m_iNFRadius, m_vecNFColor.x, m_vecNFColor.y,
+			m_vecNFColor.z, pPlayer ? "HUD init" : "refresh" );
+}
+
+void CLight::EntityLightThink( void )
+{
+	SendEntityLight();
+	pev->nextthink = gpGlobals->time + 10.0f;
+}
+
+void NF_EntityLightsUpdateClient( CBasePlayer *pPlayer )
+{
+	const char *classes[] = { "entity_light", "light", "light_spot", "light_environment" };
+	int count = 0;
+	for( int i = 0; i < ARRAYSIZE( classes ); ++i )
+	{
+		CBaseEntity *pEntity = NULL;
+		while(( pEntity = UTIL_FindEntityByClassname( pEntity, classes[i] )) != NULL )
+		{
+			CLight *pLight = (CLight *)pEntity;
+			if( pLight->HasEntityLight() )
+			{
+				pLight->SendEntityLight( pPlayer );
+				++count;
+			}
+		}
+	}
+	if( NF_DEBUG( NF_DBG_EFFECTS ))
+		ALERT( at_console, "nf_debug: entity_light HUD init player %d: %d lights\n",
+			pPlayer->entindex(), count );
 }
 
 void CLight::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
