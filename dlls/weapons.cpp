@@ -386,6 +386,7 @@ void W_Precache( void )
 	UTIL_PrecacheOtherWeapon( "weapon_flashgrenade" );
 	UTIL_PrecacheOtherWeapon( "weapon_watch" );	// dlls/nf_watch.cpp
 	UTIL_PrecacheOtherWeapon( "weapon_grapple" );	// dlls/nf_grapple.cpp
+	UTIL_PrecacheOtherWeapon( "weapon_pda" );	// dlls/nf_pda.cpp
 
 	if( g_pGameRules->IsDeathmatch() )
 	{

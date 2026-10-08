@@ -246,6 +246,8 @@ static int NF_HudIconOf( CBaseEntity *pEntity )
 {
 	if( FClassnameIs( pEntity->pev, "item_lasertarget" ) && pEntity->pev->health >= 1 )
 		return NF_HUDICON_WATCH;
+	if( FClassnameIs( pEntity->pev, "item_locktarget" ))
+		return NF_HUDICON_PDA;	// retail CLockTarget 0x4207A860, also once unlocked
 	return NF_HUDICON_NONE;
 }
 

@@ -27,6 +27,7 @@ repo (mogeldev/nightfire-xash3d).
 #define NF_WEAPON_FLASHGRENADE	15
 #define NF_WEAPON_FRAGGRENADE	16
 #define NF_WEAPON_WATCH		21	// dlls/nf_watch.cpp (server only)
+#define NF_WEAPON_PDA		24	// dlls/nf_pda.cpp (server only)
 #define NF_WEAPON_GRAPPLE	26	// dlls/nf_grapple.cpp (server only)
 #define WEAPON_NF_PP9		NF_WEAPON_PP9
 
