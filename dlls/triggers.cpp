@@ -1341,6 +1341,7 @@ void CFireAndDie::Think( void )
 }
 
 #define SF_CHANGELEVEL_USEONLY		0x0002
+#define SF_CHANGELEVEL_LANDMARK		0x0004
 class CChangeLevel : public CBaseTrigger
 {
 public:
@@ -1352,7 +1353,7 @@ public:
 	void EXPORT TouchChangeLevel( CBaseEntity *pOther );
 	void ChangeLevelNow( CBaseEntity *pActivator );
 
-	static edict_t *FindLandmark( const char *pLandmarkName );
+	static edict_t *FindLandmark( const char *pLandmarkName, BOOL reportMissing = TRUE );
 	static int ChangeList( LEVELLIST *pLevelList, int maxList );
 	static int AddTransitionToList( LEVELLIST *pLevelList, int listCount, const char *pMapName, const char *pLandmarkName, edict_t *pentLandmark );
 	static int InTransitionVolume( CBaseEntity *pEntity, char *pVolumeName );
@@ -1449,7 +1450,7 @@ void CChangeLevel::ExecuteChangeLevel( void )
 FILE_GLOBAL char st_szNextMap[cchMapNameMost];
 FILE_GLOBAL char st_szNextSpot[cchMapNameMost];
 
-edict_t *CChangeLevel::FindLandmark( const char *pLandmarkName )
+edict_t *CChangeLevel::FindLandmark( const char *pLandmarkName, BOOL reportMissing )
 {
 	edict_t	*pentLandmark;
 
@@ -1462,7 +1463,8 @@ edict_t *CChangeLevel::FindLandmark( const char *pLandmarkName )
 		else
 			pentLandmark = FIND_ENTITY_BY_STRING( pentLandmark, "targetname", pLandmarkName );
 	}
-	ALERT( at_error, "Can't find landmark %s\n", pLandmarkName );
+	if( reportMissing )
+		ALERT( at_error, "Can't find landmark %s\n", pLandmarkName );
 	return NULL;
 }
 
@@ -1535,13 +1537,16 @@ void CChangeLevel::ChangeLevelNow( CBaseEntity *pActivator )
 	SUB_UseTargets( pActivator, USE_TOGGLE, 0 );
 	st_szNextSpot[0] = 0;	// Init landmark to NULL
 
-	// look for a landmark entity
-	pentLandmark = FindLandmark( m_szLandmarkName );
+	// Keep actual source landmarks for HL compatibility; Nightfire's
+	// ordinary routes instead name a spawn found only on the destination.
+	pentLandmark = FindLandmark( m_szLandmarkName, (pev->spawnflags & SF_CHANGELEVEL_LANDMARK) != 0 );
 	if( !FNullEnt( pentLandmark ) )
 	{
 		strcpy( st_szNextSpot, m_szLandmarkName );
 		gpGlobals->vecLandmarkOffset = VARS( pentLandmark )->origin;
 	}
+	else if( !(pev->spawnflags & SF_CHANGELEVEL_LANDMARK) )
+		strcpy( st_szNextSpot, m_szLandmarkName );
 	SET_VIEW(pPlayer->edict(), pPlayer->edict());
 	//ALERT( at_console, "Level touches %d levels\n", ChangeList( levels, 16 ) );
 	ALERT( at_console, "CHANGE LEVEL: %s %s\n", st_szNextMap, st_szNextSpot );
@@ -1565,18 +1570,19 @@ int CChangeLevel::AddTransitionToList( LEVELLIST *pLevelList, int listCount, con
 {
 	int i;
 
-	if( !pLevelList || !pMapName || !pLandmarkName || !pentLandmark )
+	if( !pLevelList || !pMapName || !pLandmarkName )
 		return 0;
 
 	for( i = 0; i < listCount; i++ )
 	{
-		if( pLevelList[i].pentLandmark == pentLandmark && strcmp( pLevelList[i].mapName, pMapName ) == 0 )
+		if( pLevelList[i].pentLandmark == pentLandmark && strcmp( pLevelList[i].mapName, pMapName ) == 0
+			&& strcmp( pLevelList[i].landmarkName, pLandmarkName ) == 0 )
 			return 0;
 	}
 	strcpy( pLevelList[listCount].mapName, pMapName );
 	strcpy( pLevelList[listCount].landmarkName, pLandmarkName );
 	pLevelList[listCount].pentLandmark = pentLandmark;
-	pLevelList[listCount].vecLandmarkOrigin = VARS( pentLandmark )->origin;
+	pLevelList[listCount].vecLandmarkOrigin = pentLandmark ? VARS( pentLandmark )->origin : g_vecZero;
 
 	return 1;
 }
@@ -1645,9 +1651,9 @@ int CChangeLevel::ChangeList( LEVELLIST *pLevelList, int maxList )
 		pTrigger = GetClassPtr((CChangeLevel *)VARS(pentChangelevel));
 		if( pTrigger )
 		{
-			// Find the corresponding landmark
-			pentLandmark = FindLandmark( pTrigger->m_szLandmarkName );
-			if( pentLandmark )
+			pentLandmark = FindLandmark( pTrigger->m_szLandmarkName,
+				(pTrigger->pev->spawnflags & SF_CHANGELEVEL_LANDMARK) != 0 );
+			if( pentLandmark || !(pTrigger->pev->spawnflags & SF_CHANGELEVEL_LANDMARK) )
 			{
 				// Build a list of unique transitions
 				if( AddTransitionToList( pLevelList, count, pTrigger->m_szMapName, pTrigger->m_szLandmarkName, pentLandmark ) )
@@ -1671,16 +1677,21 @@ int CChangeLevel::ChangeList( LEVELLIST *pLevelList, int maxList )
 			CBaseEntity *pEntList[MAX_ENTITY];
 			int entityFlags[MAX_ENTITY];
 
-			// Follow the linked list of entities in the PVS of the transition landmark
-			edict_t *pent = UTIL_EntitiesInPVS( pLevelList[i].pentLandmark );
+			edict_t *pentView = pLevelList[i].pentLandmark;
+			if( !pentView )
+				pentView = INDEXENT( 1 );
+			edict_t *pent = UTIL_EntitiesInPVS( pentView );
 
 			// Build a list of valid entities in this linked list (we're going to use pent->v.chain again)
 			while( !FNullEnt( pent ) )
 			{
 				CBaseEntity *pEntity = CBaseEntity::Instance( pent );
-				if( pEntity )
+				if( pEntity && (pLevelList[i].pentLandmark
+					|| strstr( STRING( pEntity->pev->classname ), "weapon_" )
+					|| strstr( STRING( pEntity->pev->classname ), "gadget_" )) )
 				{
-					//ALERT( at_console, "Trying %s\n", STRING( pEntity->pev->classname ) );
+					// Retail 0x42007BD1: named-spawn routes carry weapons/gadgets,
+					// not the source map's NPCs, trucks or brush entities.
 					int caps = pEntity->ObjectCaps();
 					if( !(caps & FCAP_DONT_SAVE ) )
 					{
@@ -1691,13 +1702,11 @@ int CChangeLevel::ChangeList( LEVELLIST *pLevelList, int maxList )
 							flags |= FENTTABLE_MOVEABLE;
 						if( pEntity->pev->globalname && !pEntity->IsDormant() )
 							flags |= FENTTABLE_GLOBAL;
-						if( flags )
+						if( flags && entityCount < MAX_ENTITY )
 						{
 							pEntList[entityCount] = pEntity;
 							entityFlags[entityCount] = flags;
 							entityCount++;
-							if( entityCount > MAX_ENTITY )
-								ALERT( at_error, "Too many entities across a transition!\n" );
 						}
 						//else
 						//	ALERT( at_console, "Failed %s\n", STRING( pEntity->pev->classname ) );

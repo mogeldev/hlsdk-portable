@@ -39,6 +39,7 @@
 #include "nf_triggers.h"
 #include "nf_env.h"
 #include "nf_lasertarget.h"
+#include "nf_debug.h"
 
 // #define DUCKFIX
 
@@ -3110,6 +3111,10 @@ void CBasePlayer::Precache( void )
 	{
 		g_fNFNewUnit = FALSE;
 		NFResetStats();
+		pev->health = 200;
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: new mission health %.0f frags %.0f shots %d hits %d nonlethal %d\n",
+				pev->health, pev->frags, m_iNFShotsTaken, m_iNFShotsHit, m_iNFNonLethal );
 	}
 
 	pev->fov = m_iFOV;	// Vit_amiN: restore the FOV on level change or map/saved game load
@@ -3148,6 +3153,9 @@ int CBasePlayer::Restore( CRestore &restore )
 		edict_t *pentSpawnSpot = EntSelectSpawnPoint( this );
 		pev->origin = VARS( pentSpawnSpot )->origin + Vector( 0, 0, 1 );
 		pev->angles = VARS( pentSpawnSpot )->angles;
+		if( NF_DEBUG( NF_DBG_TRIGGERS ))
+			ALERT( at_console, "nf_debug: named arrival %s at %.0f %.0f %.0f health %.0f frags %.0f\n",
+				STRING( gpGlobals->startspot ), pev->origin.x, pev->origin.y, pev->origin.z, pev->health, pev->frags );
 	}
 	pev->v_angle.z = 0;	// Clear out roll
 	pev->angles = pev->v_angle;
