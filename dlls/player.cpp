@@ -211,6 +211,8 @@ int gmsgNFFog = 0;
 int gmsgNFParticles = 0;
 int gmsgNFRainInfo = 0;
 int gmsgNFRainZone = 0;
+int gmsgNFSnowInfo = 0;
+int gmsgNFSnowZone = 0;
 
 void LinkUserMessages( void )
 {
@@ -280,6 +282,8 @@ void LinkUserMessages( void )
 	gmsgNFParticles = REG_USER_MSG( "Particles", -1 );
 	gmsgNFRainInfo = REG_USER_MSG( "RainInfo", 11 );
 	gmsgNFRainZone = REG_USER_MSG( "RainZone", -1 );
+	gmsgNFSnowInfo = REG_USER_MSG( "SnowInfo", 12 );
+	gmsgNFSnowZone = REG_USER_MSG( "SnowZone", -1 );
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer )
@@ -4121,6 +4125,7 @@ void CBasePlayer::UpdateClientData( void )
 		NF_FogUpdateClient( this );
 		NF_EntityLightsUpdateClient( this );
 		NF_RainUpdateClient( this );
+		NF_SnowUpdateClient( this );
 
 		// Nightfire: level totals of env_scoring, mission stats
 		NF_ScoringInitHUD( this );

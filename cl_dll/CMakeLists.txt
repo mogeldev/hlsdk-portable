@@ -114,6 +114,7 @@ set (CLDLL_SOURCES
 	nf_movie.cpp
 	nf_particles.cpp
 	nf_rain.cpp
+	nf_snow.cpp
 	MOTD.cpp
 	parsemsg.cpp
 	../pm_shared/pm_debug.c

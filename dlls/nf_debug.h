@@ -16,7 +16,7 @@ project repo.
 #define NF_DBG_MONSTERS	4	// enemy spawn, "stuck in wall" details
 #define NF_DBG_TRIGGERS	8	// HUD / mission triggers: fired, skipped, message shown
 #define NF_DBG_ITEMS	16	// pickups: health before / after
-#define NF_DBG_EFFECTS	32	// particle_emitter, client particles, entity_light spawn / resend
+#define NF_DBG_EFFECTS	32	// particles, entity lights, rain/snow settings and resend
 #define NF_DBG_VEHICLES	64	// pathtruck clip link, goals, use, restore, blocking
 
 // current nf_debug value (server: dlls/nf_debug.cpp, client: cl_dll/hl/hl_weapons.cpp)

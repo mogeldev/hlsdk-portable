@@ -123,6 +123,7 @@ set (SVDLL_SOURCES
 	nf_pda.cpp
 	nf_particles.cpp
 	nf_rain.cpp
+	nf_snow.cpp
 	nf_scoring.cpp
 	nihilanth.cpp
 	nodes.cpp
