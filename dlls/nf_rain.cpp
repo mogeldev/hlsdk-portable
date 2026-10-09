@@ -104,7 +104,10 @@ static int NF_RainClamp( int value, int lo, int hi )
 
 static void NF_SendRainInfo( CRainInfo *info, CBasePlayer *player )
 {
-	MESSAGE_BEGIN( player ? MSG_ONE : MSG_ALL, gmsgNFRainInfo, NULL, player ? player->pev : NULL );
+	if( player )
+		MESSAGE_BEGIN( MSG_ONE, gmsgNFRainInfo, NULL, player->pev );
+	else
+		MESSAGE_BEGIN( MSG_ALL, gmsgNFRainInfo );
 		WRITE_BYTE( info ? info->m_iState != 0 : 1 );
 		WRITE_BYTE( info ? NF_RainClamp( info->m_iDensity, 0, 255 ) : 5 );
 		WRITE_BYTE( info ? NF_RainClamp( info->m_iXDegrees, -90, 90 ) + 90 : 90 );
