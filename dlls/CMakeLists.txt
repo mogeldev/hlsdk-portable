@@ -118,6 +118,7 @@ set (SVDLL_SOURCES
 	nf_aievent.cpp
 	nf_lasertarget.cpp
 	nf_watch.cpp
+	nf_taser.cpp
 	nf_grapple.cpp
 	nf_pda.cpp
 	nf_particles.cpp

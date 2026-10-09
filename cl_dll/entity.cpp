@@ -954,6 +954,9 @@ cl_entity_t DLLEXPORT *HUD_GetUserEntity( int index )
 		return NULL;
 	}
 #else
-	return NULL;
+	cl_entity_t *player = gEngfuncs.GetLocalPlayer();
+	if( player && index == player->index )
+		return gEngfuncs.GetViewModel();
+	return index > 0 ? gEngfuncs.GetEntityByIndex( index ) : NULL;
 #endif
 }

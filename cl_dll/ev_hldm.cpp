@@ -27,6 +27,7 @@
 #include "ev_hldm.h"
 
 #include "r_efx.h"
+#include "dlight.h"
 #include "event_api.h"
 #include "event_args.h"
 #include "in_defs.h"
@@ -57,6 +58,7 @@ void EV_FireGlock1( struct event_args_s *args );
 void EV_FireGlock2( struct event_args_s *args );
 void EV_FirePP9( struct event_args_s *args );
 void EV_FireNFGun( struct event_args_s *args );
+void EV_Taser( struct event_args_s *args );
 void EV_FireShotGunSingle( struct event_args_s *args );
 void EV_FireShotGunDouble( struct event_args_s *args );
 void EV_FireMP5( struct event_args_s *args );
@@ -509,6 +511,23 @@ void EV_HLDM_FireBullets( int idx, float *forward, float *right, float *up, int 
 
 		gEngfuncs.pEventAPI->EV_PopPMStates();
 	}
+}
+
+void EV_Taser( event_args_t *args )
+{
+	cl_entity_t *entity = EV_IsLocal( args->entindex ) ? gEngfuncs.GetViewModel() : gEngfuncs.GetEntityByIndex( args->entindex );
+	if( !entity )
+		return;
+	dlight_t *light = gEngfuncs.pEfxAPI->CL_AllocDlight( args->entindex );
+	if( !light )
+		return;
+	VectorCopy( entity->attachment[0], light->origin );
+	light->radius = gEngfuncs.pfnRandomFloat( 10, 22 );
+	light->color.r = gEngfuncs.pfnRandomLong( 16, 48 );
+	light->color.g = gEngfuncs.pfnRandomLong( 16, 48 );
+	light->color.b = gEngfuncs.pfnRandomLong( 160, 224 );
+	light->decay = 0;
+	light->die = gEngfuncs.GetClientTime() + args->fparam1;
 }
 
 //======================

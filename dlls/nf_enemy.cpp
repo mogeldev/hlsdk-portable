@@ -77,6 +77,7 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "nodes.h"
 #include "nf_debug.h"
 #include "nf_aievent.h"
+#include "nf_taser.h"
 #include "player.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
@@ -115,6 +116,7 @@ enum
 	TASK_NF_COVER_STAND,				// retail 130: stand up from the crouch
 	TASK_NF_COVER_CROUCH,				// retail 131: crouch again
 	TASK_NF_CORNER_FIRE,				// retail 134: step out, fire, step back
+	TASK_NF_TASER,
 };
 
 //=========================================================
@@ -129,7 +131,7 @@ static const char *const g_nfSkillCvars[] =
 	// player weapons (dlls/nf_pp9.cpp, dlls/nf_guns.cpp)
 	"sk_plr_pp9_bullet", "sk_plr_mp9_bullet", "sk_plr_commando_bullet", "sk_plr_pdw90_bullet",
 	"sk_plr_kowloon_bullet", "sk_plr_raptor_bullet", "sk_plr_sniper_bullet",	// sk_plr_buckshot: Half-Life registers it
-	"sk_plr_minigun_bullet",
+	"sk_plr_minigun_bullet", "sk_plr_taser",
 };
 
 static cvar_t g_nfSkill[ARRAYSIZE( g_nfSkillCvars ) * 3];
@@ -206,7 +208,11 @@ public:
 	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
 	void Killed( entvars_t *pevAttacker, int iGib );
+	void UpdateOnRemove( void );
 	void NFCountEnemy( CBaseEntity *pPlayer );
+	BOOL TaserAcquire( CBaseEntity *weapon );
+	BOOL TaserHeld( CBaseEntity *weapon );
+	void TaserRelease( CBaseEntity *weapon );
 	BOOL FOkToSpeak( void ) { return FALSE; }	// no HG_* sentence groups in Nightfire
 	Schedule_t *GetSchedule( void );
 	Schedule_t *GetScheduleOfType( int Type );
@@ -242,6 +248,7 @@ private:
 	// mission stats (retail CBaseCharacter m_fCounted +0x3D5 / m_fDispatched +0x3D4)
 	BOOL m_fNFCounted;
 	BOOL m_fNFDispatched;
+	EHANDLE m_hTaserWeapon;
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -307,6 +314,7 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_flNextCoverFire, FIELD_TIME ),
 	DEFINE_FIELD( CNightfireEnemy, m_fNFCounted, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_fNFDispatched, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_hTaserWeapon, FIELD_EHANDLE ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -646,7 +654,7 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 		break;
 	case ACT_SMALL_FLINCH:
 	case ACT_BIG_FLINCH:	// 27 is the electrocution loop in Nightfire
-		iSequence = LookupActivity( ACT_FLINCH_CHEST );
+		iSequence = m_hTaserWeapon != 0 ? LookupSequence( "electrocution" ) : LookupActivity( ACT_FLINCH_CHEST );
 		break;
 	case ACT_FLINCH_LEFTARM:
 		iSequence = LookupActivity( (Activity)NF_ACT_FLINCH_LEFTARM );
@@ -904,6 +912,7 @@ void CNightfireEnemy::TraceAttack( entvars_t *pevAttacker, float flDamage, Vecto
 
 void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 {
+	TaserRelease( m_hTaserWeapon );
 	// [assumed] an event not reached yet is free again (retail releases
 	// only events whose sequence is done, in HandleCustomActivity)
 	if( !m_fAIEventDone || m_iCoverID != NF_COVER_NONE )
@@ -1030,6 +1039,76 @@ Schedule_t slNFDuctAttack[] =
 	{ tlNFDuctAttack, ARRAYSIZE( tlNFDuctAttack ), NF_COVER_INTERRUPTS, bits_SOUND_DANGER, "NFDuctAttack" },
 };
 
+Task_t tlNFTaser[] =
+{
+	{ TASK_STOP_MOVING, 0 },
+	{ TASK_NF_TASER, 0 },
+};
+
+Schedule_t slNFTaser[] =
+{
+	{ tlNFTaser, ARRAYSIZE( tlNFTaser ), 0, 0, "NFTaser" },
+};
+
+void CNightfireEnemy::UpdateOnRemove( void )
+{
+	TaserRelease( m_hTaserWeapon );
+	CHGrunt::UpdateOnRemove();
+}
+
+BOOL CNightfireEnemy::TaserHeld( CBaseEntity *weapon )
+{
+	return weapon && (CBaseEntity *)m_hTaserWeapon == weapon;
+}
+
+BOOL CNightfireEnemy::TaserAcquire( CBaseEntity *weapon )
+{
+	if( !weapon || !IsAlive() || HasMemory( bits_MEMORY_KILLED ) ||
+		m_MonsterState == MONSTERSTATE_SCRIPT || ( m_hTaserWeapon != 0 && !TaserHeld( weapon )))
+		return FALSE;
+	if( TaserHeld( weapon ))
+		return TRUE;
+	ReleaseAIEvent( FALSE );
+	m_hTaserWeapon = weapon;
+	RouteClear();
+	pev->velocity = g_vecZero;
+	ChangeSchedule( slNFTaser );
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' taser held\n", STRING( pev->targetname ));
+	return TRUE;
+}
+
+void CNightfireEnemy::TaserRelease( CBaseEntity *weapon )
+{
+	if( !TaserHeld( weapon ))
+		return;
+	m_hTaserWeapon = NULL;
+	STOP_SOUND( edict(), CHAN_STATIC, "misc/electrocution.wav" );
+	if( IsAlive() && !HasMemory( bits_MEMORY_KILLED ) && m_pSchedule == slNFTaser )
+	{
+		ClearSchedule();
+		m_IdealActivity = ACT_IDLE;
+	}
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' taser released\n", STRING( pev->targetname ));
+}
+
+BOOL NF_TaserAcquire( CBaseEntity *target, CBaseEntity *weapon )
+{
+	return target && FClassnameIs( target->pev, "enemy_generic" ) && ((CNightfireEnemy *)target)->TaserAcquire( weapon );
+}
+
+BOOL NF_TaserHeld( CBaseEntity *target, CBaseEntity *weapon )
+{
+	return target && FClassnameIs( target->pev, "enemy_generic" ) && ((CNightfireEnemy *)target)->TaserHeld( weapon );
+}
+
+void NF_TaserRelease( CBaseEntity *target, CBaseEntity *weapon )
+{
+	if( target && FClassnameIs( target->pev, "enemy_generic" ))
+		((CNightfireEnemy *)target)->TaserRelease( weapon );
+}
+
 DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 {
 	slNFPatrol,
@@ -1038,6 +1117,7 @@ DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 	slNFDuckAttack,
 	slNFWallAttack,
 	slNFDuctAttack,
+	slNFTaser,
 };
 
 IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
@@ -1418,6 +1498,8 @@ BOOL NF_EnemyActivateAIEvent( CBaseEntity *pEntity, CAIEvent *pEvent, CBaseEntit
 
 Schedule_t *CNightfireEnemy::GetSchedule( void )
 {
+	if( IsAlive() && m_hTaserWeapon != 0 )
+		return slNFTaser;
 	if( IsAlive() && InCover())
 	{
 		Schedule_t *pCover = GetCoverSchedule();
@@ -1472,6 +1554,8 @@ Schedule_t *CNightfireEnemy::GetSchedule( void )
 
 Schedule_t *CNightfireEnemy::GetScheduleOfType( int Type )
 {
+	if( IsAlive() && m_hTaserWeapon != 0 )
+		return slNFTaser;
 	if( Type == SCHED_NF_PATROL )
 		return slNFPatrol;
 	if( Type == SCHED_NF_AIEVENT_PLAY )
@@ -1505,6 +1589,11 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 {
 	switch( pTask->iTask )
 	{
+	case TASK_NF_TASER:
+		m_IdealActivity = ACT_BIG_FLINCH;
+		SetActivity( ACT_BIG_FLINCH );
+		EMIT_SOUND( edict(), CHAN_STATIC, "misc/electrocution.wav", 1, ATTN_NORM );
+		break;
 	case TASK_NF_PATROL_MOVE:
 		if( StartPatrolMove())
 		{
@@ -1617,6 +1706,15 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 {
 	switch( pTask->iTask )
 	{
+	case TASK_NF_TASER:
+		if( m_hTaserWeapon == 0 )
+		{
+			STOP_SOUND( edict(), CHAN_STATIC, "misc/electrocution.wav" );
+			TaskComplete();
+		}
+		else
+			pev->velocity = g_vecZero;
+		break;
 	case TASK_NF_PATROL_WAIT:
 		if( gpGlobals->time >= m_flWaitFinished )
 			TaskComplete();
