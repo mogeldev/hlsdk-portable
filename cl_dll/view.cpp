@@ -26,6 +26,7 @@
 #include "shake.h"
 #include "hltv.h"
 #include "view.h"
+#include "nf_hud.h"
 
 // Spectator Mode
 extern "C" 
@@ -776,6 +777,9 @@ void V_CalcNormalRefdef( struct ref_params_s *pparams )
 		VectorCopy( view->angles, view->curstate.angles );
 		VectorCopy( view->angles, view->latched.prevangles );
 	}
+
+	if( NF_HudScopeActive() && !CL_IsThirdPerson() && pparams->viewentity <= pparams->maxclients )
+		view->model = NULL;
 
 	lasttime = pparams->time;
 

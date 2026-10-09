@@ -9,6 +9,7 @@ void NF_HudInit( void );		// CHud::Init (message hooks: SetHudIcon)
 void NF_HudVidInit( void );		// CHud::VidInit (sprites are freed on a map change)
 void NF_HudDraw( float flTime );	// CHud::Redraw
 bool NF_HudActive( void );		// the retail images were found
+bool NF_HudScopeActive( void );	// existing L96 zoom with a drawable scope overlay
 void NF_HudFlash( void );		// hint: flash the health iris with beeps
 
 // draw an image sprite (engine fork: image files as one-frame sprites) as a TriAPI quad

@@ -1,6 +1,6 @@
 /*
 nf_hud.cpp - James Bond 007: Nightfire (PC) in-game HUD: health iris, ammo
-panel, crosshair
+panel, crosshair and sniper scope
 
 The retail client draws its HUD from plain images (gui/hud/640_*.png, loaded
 by the engine fork as one-frame sprites) at their own pixel size, no scaling
@@ -64,6 +64,8 @@ Without the images the port's text panels (hud_redraw.cpp) stay.
 #include "nf_hud.h"
 #include "nf_debug.h"
 
+extern float g_lastFOV;
+
 enum
 {
 	NF_AMMO_NONE = 0,
@@ -117,7 +119,8 @@ static const nf_ammopanel_t s_ammoPanels[32] =
 };
 
 static HSPRITE s_hIrisCircle, s_hIris[9], s_hIrisFlash;
-static HSPRITE s_hAmmoCircle, s_hCrosshair;
+static HSPRITE s_hAmmoCircle, s_hCrosshair, s_hSniperScope;
+static int s_iScopeWeapon, s_iScopeFOV;
 static HSPRITE s_hClip[32], s_hBack[32], s_hFront[32];
 static bool s_bLoaded;
 
@@ -253,6 +256,8 @@ void NF_HudVidInit( void )
 	s_hIrisFlash = SPR_Load( "gui/hud/640_health_Iris_09.png" );
 	s_hAmmoCircle = SPR_Load( "gui/hud/640_ammo_circle.png" );
 	s_hCrosshair = SPR_Load( "gui/hud/640_crosshair_01.png" );
+	s_hSniperScope = SPR_Load( "gui/hud/sniper_1024.png" );
+	s_iScopeWeapon = s_iScopeFOV = 0;
 
 	for( int i = 0; i < 32; i++ )
 	{
@@ -371,6 +376,16 @@ bool NF_HudActive( void )
 	return s_bLoaded;
 }
 
+bool NF_HudScopeActive( void )
+{
+	int id = gHUD.m_Ammo.GetCurrentWeaponId();
+	return s_bLoaded && s_hSniperScope && gHUD.m_pCvarDraw && gHUD.m_pCvarDraw->value &&
+		!( gHUD.m_iHideHUDDisplay & ( HIDEHUD_ALL | HIDEHUD_WEAPONS )) &&
+		!gHUD.m_fPlayerDead && !gEngfuncs.IsSpectateOnly() &&
+		( id == 12 || id == 13 ) &&
+		( g_lastFOV == 40.0f || g_lastFOV == 10.0f );
+}
+
 void NF_HudFlash( void )
 {
 	// retail 0x41040740: beep now, then the on/off steps
@@ -449,9 +464,22 @@ static void NF_DrawAmmo( void )
 
 void NF_HudDraw( float flTime )
 {
+	bool scoped = NF_HudScopeActive();
+	int scopeWeapon = scoped ? gHUD.m_Ammo.GetCurrentWeaponId() : 0;
+	int scopeFOV = scoped ? (int)g_lastFOV : 0;
+	if( scopeWeapon != s_iScopeWeapon || scopeFOV != s_iScopeFOV )
+	{
+		if( NF_DEBUG( NF_DBG_WEAPONS ))
+			gEngfuncs.Con_Printf( "nf_debug: cl: sniper scope %s id %d fov %d\n", scoped ? "on" : "off", scopeWeapon, scopeFOV );
+		s_iScopeWeapon = scopeWeapon;
+		s_iScopeFOV = scopeFOV;
+	}
 	if( !s_bLoaded || !gHUD.m_pCvarDraw || !gHUD.m_pCvarDraw->value ||
 		( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL ) || gEngfuncs.IsSpectateOnly() )
 		return;
+
+	if( scoped )
+		NF_DrawImage( s_hSniperScope, 0, 0, ScreenWidth, ScreenHeight, 1.0f );
 
 	if( !( gHUD.m_iHideHUDDisplay & HIDEHUD_HEALTH ))
 		NF_DrawHealth( flTime );
@@ -460,7 +488,7 @@ void NF_HudDraw( float flTime )
 	{
 		NF_DrawAmmo();
 
-		if( s_hCrosshair && gHUD.m_Ammo.GetCurrentWeaponId() > 0 )
+		if( !scoped && s_hCrosshair && gHUD.m_Ammo.GetCurrentWeaponId() > 0 )
 		{
 			int w = NF_SpriteW( s_hCrosshair ), h = NF_SpriteH( s_hCrosshair );
 			NF_DrawImage( s_hCrosshair, ( ScreenWidth - w ) / 2, ( ScreenHeight - h ) / 2, w, h, 1.0f );
