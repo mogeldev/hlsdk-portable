@@ -54,6 +54,7 @@ public:
 		if( m_camera ) { SendWeaponAnim( 5 ); End(); }
 		else { m_camera = TRUE; m_ready = gpGlobals->time + 1.96f; SendWeaponAnim( 3 ); }
 		m_flNextPrimaryAttack = gpGlobals->time + 1.96f; m_flNextSecondaryAttack = gpGlobals->time + 2.96f;
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: camera mode %d\n", m_camera );
 	}
 	BOOL MarkerVisible( CBaseEntity *entity )
 	{

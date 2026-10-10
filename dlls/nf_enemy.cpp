@@ -542,7 +542,7 @@ BOOL NF_CheckCharacterAITrigger( CBaseMonster *monster )
 		if( dead )
 		{
 			fire = TRUE;
-			if( FStringNull( monster->pev->netname ) || !STRING( monster->pev->netname )[0] )
+			if( FStringNull( monster->pev->netname ) || !( STRING( monster->pev->netname ))[0] )
 				fire = FALSE;
 			else
 			{

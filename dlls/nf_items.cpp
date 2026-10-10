@@ -49,7 +49,7 @@ static Vector NF_ParseVector( const char *s )
 
 static BOOL NF_IsNone( string_t s )
 {
-	return FStringNull( s ) || !STRING( s )[0] || FStrEq( STRING( s ), "none" );
+	return FStringNull( s ) || !( STRING( s ))[0] || FStrEq( STRING( s ), "none" );
 }
 
 #define SF_NFITEM_USE_ONCE 0x20
@@ -356,10 +356,10 @@ BOOL NF_ItemUsePoint( CBaseEntity *entity, const Vector &source, Vector &point )
 	Vector mins = entity->pev->origin + entity->pev->mins;
 	Vector maxs = entity->pev->origin + entity->pev->maxs;
 	// Retain the authored interaction height when sequence bounds lie below it.
-	mins.z = min( mins.z, entity->pev->origin.z );
-	maxs.z = max( maxs.z, entity->pev->origin.z );
+	mins.z = Q_min( mins.z, entity->pev->origin.z );
+	maxs.z = Q_max( maxs.z, entity->pev->origin.z );
 	for( int i = 0; i < 3; i++ )
-		point[i] = max( mins[i], min( maxs[i], source[i] ));
+		point[i] = Q_max( mins[i], Q_min( maxs[i], source[i] ));
 	return TRUE;
 }
 
@@ -415,7 +415,7 @@ LINK_ENTITY_TO_CLASS( item_grappletarget, CNightfireGrappleTarget )
 
 void CNightfireGrappleTarget::Spawn( void )
 {
-	if( FStringNull( pev->model ) || !STRING( pev->model )[0] )
+	if( FStringNull( pev->model ) || !( STRING( pev->model ))[0] )
 		pev->model = MAKE_STRING( "models/grapple_point.mdl" );
 
 	CNightfireItem::Spawn();

@@ -275,7 +275,7 @@ void CNightfireLaserRifle::PrimaryAttack( void )
 	if( m_flBattery <= 0 ) { m_bRecharge = TRUE; return; }
 	float damage = NF_SkillValue( "sk_plr_laser" );
 	NF_ShootProjectile( m_pPlayer, "laser_beam", 1500, damage > 0 ? damage : 20 );
-	m_flBattery = max( 0.0f, m_flBattery - 5 );
+	m_flBattery = Q_max( 0.0f, m_flBattery - 5 );
 	SetBattery();
 	SendWeaponAnim( 2 );
 	m_pPlayer->SetAnimation( PLAYER_ATTACK1 );
@@ -309,11 +309,11 @@ void CNightfireLaserRifle::ReleaseCharge( void )
 
 void CNightfireLaserRifle::ItemPostFrame( void )
 {
-	float dt = max( 0.0f, gpGlobals->time - m_flLastUpdate );
+	float dt = Q_max( 0.0f, gpGlobals->time - m_flLastUpdate );
 	m_flLastUpdate = gpGlobals->time;
 	if( m_iCharging )
 	{
-		float cost = min( 20.0f - m_flCharge, min( m_flBattery, dt * 20 ) );
+		float cost = Q_min( 20.0f - m_flCharge, Q_min( m_flBattery, dt * 20 ) );
 		m_flBattery -= cost;
 		m_flCharge += cost;
 		if( m_iCharging == 1 && gpGlobals->time - m_flChargeStart >= 0.26f )
@@ -332,7 +332,7 @@ void CNightfireLaserRifle::ItemPostFrame( void )
 	if( m_bRecharge || !( m_pPlayer->pev->button & ( IN_ATTACK | IN_ATTACK2 )))
 	{
 		// Retail adds 0.5 per idle frame; normalize its 100 Hz behavior to time.
-		m_flBattery = min( 100.0f, m_flBattery + dt * 50 );
+		m_flBattery = Q_min( 100.0f, m_flBattery + dt * 50 );
 		if( m_flBattery >= 100 ) m_bRecharge = FALSE;
 	}
 	SetBattery();
