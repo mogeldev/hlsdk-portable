@@ -20,6 +20,7 @@
 #include "nf_particles.h"
 #include "nf_rain.h"
 #include "nf_snow.h"
+#include "nf_searchlight.h"
 
 extern "C"
 {
@@ -121,6 +122,7 @@ void DLLEXPORT HUD_DrawTransparentTriangles( void )
 	NF_ParticlesRender();
 	NF_RainRender();
 	NF_SnowRender();
+	NF_SearchlightRender();
 
 #if TEST_IT
 //	Draw_Triangles();

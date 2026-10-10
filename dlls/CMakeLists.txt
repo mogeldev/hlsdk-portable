@@ -107,6 +107,8 @@ set (SVDLL_SOURCES
 	mp5.cpp
 	multiplay_gamerules.cpp
 	nf_enemy.cpp
+	nf_character.cpp
+	nf_searchlight.cpp
 	nf_items.cpp
 	nf_pp9.cpp
 	nf_guns.cpp

@@ -1927,7 +1927,13 @@ void EntvarsKeyvalue( entvars_t *pev, KeyValueData *pkvd )
 				( *(float *)( (char *)pev + pField->fieldOffset ) ) = atof( pkvd->szValue );
 				break;
 			case FIELD_INTEGER:
-				( *(int *)( (char *)pev + pField->fieldOffset ) ) = atoi( pkvd->szValue );
+				if( pField->fieldOffset == offsetof( entvars_t, spawnflags ) && pkvd->szValue[0] != '-' )
+				{
+					// Authored Nightfire masks can set bit 31 (e.g. 2148532256).
+					unsigned int flags = (unsigned int)strtoul( pkvd->szValue, NULL, 10 );
+					memcpy( (char *)pev + pField->fieldOffset, &flags, sizeof( flags ));
+				}
+				else ( *(int *)( (char *)pev + pField->fieldOffset ) ) = atoi( pkvd->szValue );
 				break;
 			case FIELD_POSITION_VECTOR:
 			case FIELD_VECTOR:

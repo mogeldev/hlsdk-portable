@@ -13,7 +13,7 @@ project repo.
 
 #define NF_DBG_WEAPONS	1	// fire rounds, client prediction state, fire events
 #define NF_DBG_DECALS	2	// impact texture / material / decal
-#define NF_DBG_MONSTERS	4	// enemy spawn, "stuck in wall" details
+#define NF_DBG_MONSTERS	4	// enemy AI, character changes, searchlight events/reports
 #define NF_DBG_TRIGGERS	8	// HUD / mission triggers: fired, skipped, message shown
 #define NF_DBG_ITEMS	16	// pickups: health before / after
 #define NF_DBG_EFFECTS	32	// particles, entity lights, rain/snow settings and resend

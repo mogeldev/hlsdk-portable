@@ -78,6 +78,8 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "nf_debug.h"
 #include "nf_aievent.h"
 #include "nf_taser.h"
+#include "nf_character.h"
+#include "nf_searchlight.h"
 #include "player.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
@@ -210,6 +212,9 @@ public:
 	void Killed( entvars_t *pevAttacker, int iGib );
 	void UpdateOnRemove( void );
 	void NFCountEnemy( CBaseEntity *pPlayer );
+	void ChangeCharacter( const nf_character_change_t &change );
+	void ReportCharacter( void );
+	BOOL CorpseSpotted( BOOL mark ) { BOOL spotted = m_fCorpseSpotted; if( mark ) m_fCorpseSpotted = TRUE; return spotted; }
 	BOOL TaserAcquire( CBaseEntity *weapon );
 	BOOL TaserHeld( CBaseEntity *weapon );
 	void TaserRelease( CBaseEntity *weapon );
@@ -248,10 +253,14 @@ private:
 	// mission stats (retail CBaseCharacter m_fCounted +0x3D5 / m_fDispatched +0x3D4)
 	BOOL m_fNFCounted;
 	BOOL m_fNFDispatched;
+	BOOL m_fCorpseSpotted;
 	EHANDLE m_hTaserWeapon;
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
+	string_t m_iszDeathCamera;
+	string_t m_iszRescueTarget;
+	string_t m_iszCameraTarget;
 	string_t m_iszCharName;
 	int m_iWeapon;
 	int m_iGunIndex;
@@ -287,6 +296,9 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 {
 	DEFINE_FIELD( CNightfireEnemy, m_flSightDist, FIELD_FLOAT ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszDeathTarget, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_iszDeathCamera, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_iszRescueTarget, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_iszCameraTarget, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszCharName, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iWeapon, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_iGunIndex, FIELD_INTEGER ),
@@ -314,6 +326,7 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_flNextCoverFire, FIELD_TIME ),
 	DEFINE_FIELD( CNightfireEnemy, m_fNFCounted, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_fNFDispatched, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_fCorpseSpotted, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_hTaserWeapon, FIELD_EHANDLE ),
 };
 
@@ -390,6 +403,96 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	}
 	else
 		CHGrunt::KeyValue( pkvd );
+}
+
+void CNightfireEnemy::ChangeCharacter( const nf_character_change_t &change )
+{
+	if( change.triggerTarget )
+	{
+		m_iszTriggerTarget = change.triggerTarget;
+		m_iTriggerCondition = change.triggerCondition;
+	}
+	if( change.minPatrol > 0 ) m_flMinPatrolDist = change.minPatrol;
+	if( change.maxPatrol > 0 ) m_flMaxPatrolDist = change.maxPatrol;
+	if( change.maxPath > 0 ) m_flMaxPatrolPath = change.maxPath;
+	if( change.waitPatrol > 0 ) m_flWaitPatrolTime = change.waitPatrol;
+	// Retail tests the character's OLD mask, not the trigger's new value.
+	if( m_dwExcludeAIEvents != 0 ) m_dwExcludeAIEvents = change.excludeEvents;
+	if( change.deathTarget ) m_iszDeathTarget = change.deathTarget;
+	if( change.deathCamera ) m_iszDeathCamera = change.deathCamera;
+	if( change.rescueTarget ) m_iszRescueTarget = change.rescueTarget;
+	if( change.cameraTarget ) m_iszCameraTarget = change.cameraTarget;
+	if( change.sight > 0 ) m_flDistTooFar = m_flDistLook = m_flSightDist = change.sight;
+	if( change.initEvent > 0 && !m_iInitEventID && m_MonsterState == MONSTERSTATE_IDLE )
+	{
+		m_iInitEventID = change.initEvent;
+		// The full retail character reinitialization/custom-event flow is not ported.
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: character %s stored initial event %d (execution unsupported)\n", STRING( pev->targetname ), change.initEvent );
+	}
+	if( change.spawnflags )
+	{
+		m_iNFSpawnflags = change.spawnflags;
+		pev->spawnflags = change.spawnflags & NF_ENEMY_SPAWNFLAGS_HL;
+	}
+	if( change.hostageGroup ) pev->netname = change.hostageGroup;
+	// CGenericEnemy's retail weapon-change virtual (0x4205FDC0) is inert.
+	if( NF_DEBUG( NF_DBG_MONSTERS )) ReportCharacter();
+}
+
+void CNightfireEnemy::ReportCharacter( void )
+{
+	ALERT( at_console, "nf_debug: character %s flags 0x%x sight %.0f patrol %.0f/%.0f/%.0f wait %.1f exclude %d trigger %s/%d death %s weapon %d gun %d enemy %d\n",
+		STRING( pev->targetname ), m_iNFSpawnflags, m_flDistLook,
+		m_flMinPatrolDist, m_flMaxPatrolDist, m_flMaxPatrolPath, m_flWaitPatrolTime,
+		m_dwExcludeAIEvents, STRING( m_iszTriggerTarget ), m_iTriggerCondition,
+		STRING( m_iszDeathTarget ), m_iWeapon, m_iGunIndex,
+		m_hEnemy ? ((CBaseEntity *)m_hEnemy)->entindex() : 0 );
+}
+
+BOOL NF_EnemyChangeCharacter( CBaseEntity *entity, const nf_character_change_t &change )
+{
+	if( !entity || !FClassnameIs( entity->pev, "enemy_generic" )) return FALSE;
+	((CNightfireEnemy *)entity)->ChangeCharacter( change );
+	return TRUE;
+}
+
+BOOL NF_CharacterCommand( CBaseEntity *player, const char *command )
+{
+	if( !FStrEq( command, "nf_characterinfo" )) return FALSE;
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+	{
+		CBaseEntity *entity = NULL;
+		while(( entity = UTIL_FindEntityByClassname( entity, "enemy_generic" )) != NULL )
+			if( CMD_ARGC() < 2 || FStrEq( STRING( entity->pev->targetname ), CMD_ARGV( 1 )))
+				((CNightfireEnemy *)entity)->ReportCharacter();
+	}
+	return TRUE;
+}
+
+BOOL NF_EnemyCorpseSpotted( CBaseEntity *entity, BOOL mark )
+{
+	return !entity || !FClassnameIs( entity->pev, "enemy_generic" ) ||
+		((CNightfireEnemy *)entity)->CorpseSpotted( mark );
+}
+
+void NF_EnemySearchlightAlarm( CBaseEntity *entity, CBaseEntity *target, float distance )
+{
+	if( !entity || !target || !FClassnameIs( entity->pev, "enemy_generic" )) return;
+	CBaseMonster *guard = entity->MyMonsterPointer();
+	if( !guard || !guard->IsAlive()) return;
+	guard->m_vecEnemyLKP = target->pev->origin;
+	guard->Remember( 0x800000 );
+	if( distance > 0 )
+	{
+		guard->m_flDistLook = guard->m_flDistTooFar = distance;
+		guard->Remember( 0x1000 );
+	}
+	guard->ChangeSchedule( guard->GetScheduleOfType( SCHED_COMBAT_FACE ));
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: searchlight guard %s notified sight %.0f enemy %d\n",
+			STRING( entity->pev->targetname ), guard->m_flDistLook,
+			guard->m_hEnemy ? ((CBaseEntity *)guard->m_hEnemy)->entindex() : 0 );
 }
 
 // weapon pickup dropped for a primary_weapon id; NULL while the player
