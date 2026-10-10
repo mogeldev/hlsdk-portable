@@ -110,10 +110,16 @@ set (SVDLL_SOURCES
 	nf_character.cpp
 	nf_searchlight.cpp
 	nf_traversal.cpp
+	nf_deathcamera.cpp
 	nf_items.cpp
 	nf_pp9.cpp
 	nf_guns.cpp
+	nf_energy.cpp
+	nf_inventory.cpp
 	nf_grenades.cpp
+	nf_launchers.cpp
+	nf_bondmine.cpp
+	nf_ronin.cpp
 	nf_materials.cpp
 	nf_debug.cpp
 	nf_triggers.cpp
@@ -124,6 +130,8 @@ set (SVDLL_SOURCES
 	nf_taser.cpp
 	nf_grapple.cpp
 	nf_pda.cpp
+	nf_gadgets.cpp
+	nf_lighter.cpp
 	nf_particles.cpp
 	nf_rain.cpp
 	nf_snow.cpp

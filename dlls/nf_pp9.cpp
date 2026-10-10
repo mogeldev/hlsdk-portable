@@ -21,6 +21,14 @@ Built into the server and the client (weapon prediction).
 #include "nodes.h"
 #include "player.h"
 #include "nf_weapons.h"
+#ifndef CLIENT_DLL
+TYPEDESCRIPTION CNightfirePP9::m_SaveData[] =
+{
+	DEFINE_FIELD( CNightfirePP9, m_fireState, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfirePP9, m_fInReload, FIELD_INTEGER ),
+};
+IMPLEMENT_SAVERESTORE( CNightfirePP9, CBasePlayerWeapon )
+#endif
 
 enum nf_pp9_e
 {
@@ -173,8 +181,7 @@ void CNightfirePP9::PrimaryAttack( void )
 	Vector vecSrc = m_pPlayer->GetGunPosition();
 	Vector vecAiming = m_pPlayer->GetAutoaimVector( AUTOAIM_10DEGREES );
 
-	// [assumed] the retail call passes spread 0; keep the HL glock's small one
-	Vector vecDir = m_pPlayer->FireBulletsPlayer( 1, vecSrc, vecAiming, VECTOR_CONE_1DEGREES, 8192, BULLET_PLAYER_9MM, 0, damage, m_pPlayer->pev, m_pPlayer->random_seed );
+	Vector vecDir = m_pPlayer->FireBulletsPlayer( 1, vecSrc, vecAiming, g_vecZero, 8192, BULLET_PLAYER_9MM, 0, damage, m_pPlayer->pev, m_pPlayer->random_seed );
 
 	PLAYBACK_EVENT_FULL( flags, m_pPlayer->edict(), m_usFirePP9, 0.0, g_vecZero, g_vecZero, vecDir.x, vecDir.y,
 		PP9_SILENCED ? 1 : 0, 0, ( m_iClip == 0 ) ? 1 : 0, 0 );

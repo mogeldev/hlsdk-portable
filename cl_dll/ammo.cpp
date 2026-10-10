@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "ammohistory.h"
+#include "nf_wheel.h"
 #include "vgui_TeamFortressViewport.h"
 
 WEAPON *gpActiveSel;	// NULL means off, 1 means just the menu bar, otherwise
@@ -296,6 +297,7 @@ int CHudAmmo::Init( void )
 
 void CHudAmmo::Reset( void )
 {
+	NF_WheelReset();
 	m_fFade = 0;
 	m_iFlags |= HUD_ACTIVE; //!!!
 
@@ -390,6 +392,11 @@ void CHudAmmo::Think( void )
 		}
 	}
 
+	if( NF_WheelEnabled() )
+	{
+		gpActiveSel = NULL;
+		return;
+	}
 	if( !gpActiveSel )
 		return;
 
@@ -603,6 +610,7 @@ int CHudAmmo::MsgFunc_CurWeapon( const char *pszName, int iSize, void *pbuf )
 		SetCrosshair( 0, nullrc, 0, 0, 0 );
 		// Clear out the weapon so we don't keep drawing the last active weapon's ammo. - Solokiller
 		m_pWeapon = 0;
+		NF_WheelActive( 0 );
 		return 0;
 	}
 
@@ -632,6 +640,7 @@ int CHudAmmo::MsgFunc_CurWeapon( const char *pszName, int iSize, void *pbuf )
 		return 1;
 
 	m_pWeapon = pWeapon;
+	NF_WheelActive( iId );
 
 	if( !( gHUD.m_iHideHUDDisplay & ( HIDEHUD_WEAPONS | HIDEHUD_ALL ) ) )
 	{
@@ -716,6 +725,12 @@ void CHudAmmo::SlotInput( int iSlot )
 	// Let the Viewport use it first, for menus
 	if( gViewPort && gViewPort->SlotInput( iSlot ) )
 		return;
+	if( NF_WheelEnabled() )
+	{
+		if( iSlot == 1 ) NF_WheelMode( 1 );
+		else if( iSlot == 3 ) NF_WheelMode( 3 );
+		return;
+	}
 	gWR.SelectSlot(iSlot, FALSE, 1);
 }
 
@@ -785,6 +800,11 @@ void CHudAmmo::UserCmd_Close( void )
 // Selects the next item in the weapon menu
 void CHudAmmo::UserCmd_NextWeapon( void )
 {
+	if( NF_WheelEnabled() )
+	{
+		NF_WheelCycle( 1 );
+		return;
+	}
 	if( gHUD.m_fPlayerDead || ( gHUD.m_iHideHUDDisplay & ( HIDEHUD_WEAPONS | HIDEHUD_ALL ) ) )
 		return;
 
@@ -826,6 +846,11 @@ void CHudAmmo::UserCmd_NextWeapon( void )
 // Selects the previous item in the menu
 void CHudAmmo::UserCmd_PrevWeapon( void )
 {
+	if( NF_WheelEnabled() )
+	{
+		NF_WheelCycle( -1 );
+		return;
+	}
 	if( gHUD.m_fPlayerDead || ( gHUD.m_iHideHUDDisplay & ( HIDEHUD_WEAPONS | HIDEHUD_ALL ) ) )
 		return;
 
@@ -879,7 +904,8 @@ int CHudAmmo::Draw( float flTime )
 		return 1;
 
 	// Draw Weapon Menu
-	DrawWList( flTime );
+	if( !NF_WheelEnabled() )
+		DrawWList( flTime );
 
 	// Draw ammo pickup history
 	gHR.DrawAmmoHistory( flTime );

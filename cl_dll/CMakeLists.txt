@@ -110,6 +110,8 @@ set (CLDLL_SOURCES
 	message.cpp
 	nf_fog.cpp
 	nf_hud.cpp
+	nf_wheel.cpp
+	nf_vision.cpp
 	nf_hudmsg.cpp
 	nf_movie.cpp
 	nf_particles.cpp

@@ -165,6 +165,7 @@ public:
 
 	BOOL			m_fNoPlayerSound;	// a debugging feature. Player makes no sound if this is true. 
 	BOOL			m_fLongJump; // does this player have the longjump module?
+	BOOL			m_fNFSpaceSuit; // Retail flag 0x40000000 conflicts with GoldSrc FL_KILLME.
 
 	float       m_tSneaking;
 	int			m_iUpdateTime;		// stores the number of frame ticks before sending HUD update messages
@@ -176,6 +177,7 @@ public:
 	int			m_iClientFOV;	// client's known FOV
 
 	// usable player items 
+	BOOL m_fNFOddjob;
 	CBasePlayerItem	*m_rgpPlayerItems[MAX_ITEM_TYPES];
 	CBasePlayerItem *m_pActiveItem;
 	CBasePlayerItem *m_pClientActiveItem;  // client version of the active item
@@ -329,7 +331,13 @@ public:
 	// James Bond 007: Nightfire spawn equipment, given after the map's start
 	// triggers (CHalfLifeRules::PlayerSpawn / PlayerThink); saved
 	float m_flNFEquipTime;
+	float m_flNFWeaponsFullNext;
+	int m_iNFWheelLockSent;
 
+	EHANDLE m_hNFDeathCamera, m_hNFDeathCameraWeapon;
+	BOOL m_fNFDeathCamera;
+	int m_iNFDeathCameraHUD, m_iNFDeathCameraFlags, m_iNFDeathCameraEffects;
+	string_t m_iszNFDeathCameraViewModel, m_iszNFDeathCameraWeaponModel;
 	EHANDLE m_hNFTraversalBrush;
 	EHANDLE m_hNFTraversalWeapon;
 	int m_iNFTraversalState;

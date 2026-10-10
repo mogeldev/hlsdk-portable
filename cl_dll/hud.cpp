@@ -1,3 +1,4 @@
+#include "nf_vision.h"
 /***
 *
 *	Copyright (c) 1996-2002, Valve LLC. All rights reserved.
@@ -25,6 +26,7 @@
 #include "parsemsg.h"
 #include "nf_hudmsg.h"
 #include "nf_hud.h"
+#include "nf_wheel.h"
 #include "nf_movie.h"
 #include "nf_fog.h"
 #include "nf_particles.h"
@@ -310,6 +312,8 @@ void CHud::Init( void )
 	NF_HudMsgInit();
 	NF_MovieInit();
 	NF_HudInit();
+	NF_WheelInit();
+	NF_VisionInit();
 	NF_FogInit();
 	NF_ParticlesInit();
 	NF_RainInit();
@@ -461,6 +465,8 @@ void CHud::VidInit( void )
 
 	NF_HudMsgReset();
 	NF_HudVidInit();
+	NF_WheelVidInit();
+	NF_VisionReset();
 	NF_FogVidInit();
 	NF_ParticlesVidInit();
 	NF_RainVidInit();

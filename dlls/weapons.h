@@ -424,6 +424,7 @@ extern MULTIDAMAGE gMultiDamage;
 //=========================================================
 class CWeaponBox : public CBaseEntity
 {
+protected:
 	void Precache( void );
 	void Spawn( void );
 	void Touch( CBaseEntity *pOther );

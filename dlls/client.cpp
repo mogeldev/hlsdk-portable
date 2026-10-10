@@ -42,6 +42,11 @@
 #include "nf_character.h"
 #include "nf_searchlight.h"
 #include "nf_traversal.h"
+#include "nf_items.h"
+#include "nf_deathcamera.h"
+#include "nf_inventory.h"
+#include "nf_gadgets.h"
+#include "nf_explosives.h"
 
 extern DLL_GLOBAL ULONG		g_ulModelIndexPlayer;
 extern DLL_GLOBAL BOOL		g_fGameOver;
@@ -103,7 +108,11 @@ GLOBALS ASSUMED SET:  g_fGameOver
 */
 void ClientDisconnect( edict_t *pEntity )
 {
-	if( pEntity->pvPrivateData ) NF_TraversalReset( (CBasePlayer *)CBaseEntity::Instance( pEntity ), FALSE );
+	if( pEntity->pvPrivateData )
+	{
+		NF_DeathCameraReset( (CBasePlayer *)CBaseEntity::Instance( pEntity ));
+		NF_TraversalReset( (CBasePlayer *)CBaseEntity::Instance( pEntity ), FALSE );
+	}
 	if( g_fGameOver )
 		return;
 
@@ -481,9 +490,14 @@ void ClientCommand( edict_t *pEntity )
 
 	entvars_t *pev = &pEntity->v;
 
-	if( NF_CharacterCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+	if( NF_GadgetCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_ExplosivesCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_CharacterCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
 		NF_SearchlightCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
-		NF_TraversalCommand( CBaseEntity::Instance( pEntity ), pcmd )) return;
+		NF_TraversalCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_ItemCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_DeathCameraCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_InventoryCommand( CBaseEntity::Instance( pEntity ), pcmd )) return;
 
 	if( FStrEq( pcmd, "say" ) )
 	{
@@ -556,11 +570,11 @@ void ClientCommand( edict_t *pEntity )
 	{
 		GetClassPtr( (CBasePlayer *)pev )->SelectItem( (char *)CMD_ARGV( 1 ) );
 	}
-	else if( ( ( pstr = strstr( pcmd, "weapon_" ) ) != NULL ) && ( pstr == pcmd ) )
+	else if( !strncmp( pcmd, "weapon_", 7 ) || !strncmp( pcmd, "gadget_", 7 ) )
 	{
 		GetClassPtr( (CBasePlayer *)pev )->SelectItem( pcmd );
 	}
-	else if( FStrEq( pcmd, "lastinv" ) )
+	else if( FStrEq( pcmd, "lastinv" ) || FStrEq( pcmd, "lastweapon" ) )
 	{
 		GetClassPtr( (CBasePlayer *)pev )->SelectLastItem();
 	}
@@ -651,6 +665,8 @@ it gets sent into the rest of the engine.
 */
 void ClientUserInfoChanged( edict_t *pEntity, char *infobuffer )
 {
+	if( pEntity->pvPrivateData && gpGlobals->deathmatch )
+		((CBasePlayer *)CBaseEntity::Instance( pEntity ))->m_fNFOddjob = FStrEq( g_engfuncs.pfnInfoKeyValue( infobuffer, "model" ), "mp_oddjob" );
 	// Is the client spawned yet?
 	if( !pEntity->pvPrivateData )
 		return;
@@ -1129,6 +1145,7 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 {
 	int i;
 	CBaseEntity *Entity;
+	const int visionCharacter = NF_GadgetVisionTarget( host, ent );
 
 	// don't send if flagged for NODRAW and it's not the host getting the message
 	if( ( ent->v.effects & EF_NODRAW ) && ( ent != host ) )
@@ -1151,7 +1168,7 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 		if( !ENGINE_CHECK_VISIBILITY( (const struct edict_s *)ent, pSet ) )
 		{
 			// env_sky is visible always
-			if( !FClassnameIs( ent, "env_sky" ) )
+			if( visionCharacter != 3 && !FClassnameIs( ent, "env_sky" ) )
 			{
 				return 0;
 			}
@@ -1274,6 +1291,7 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 	// engine's water renderer (retail engine.dll reads both from the client entity)
 	state->fuser1		= ent->v.fuser1;
 	state->iuser1		= ent->v.iuser1;
+	if( visionCharacter ) state->iuser4 = NF_VISION_CHARACTER;
 	if( player )
 	{
 		state->iuser4 = ent->v.iuser4;

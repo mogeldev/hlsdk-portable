@@ -371,6 +371,7 @@ public:
 	void PrimaryAttack( void );
 	void SecondaryAttack( void ) { PrimaryAttack(); }	// retail 0x420E21F0
 	void WeaponIdle( void );
+	void UpdateOnRemove( void ) { Release(); CBasePlayerWeapon::UpdateOnRemove(); }
 	BOOL IsUseable( void ) { return TRUE; }
 	BOOL CanDeploy( void ) { return TRUE; }
 
@@ -557,7 +558,12 @@ void CNightfirePDA::PrimaryAttack( void )
 
 	CBaseEntity *pLock = m_hLockTarget;
 	if( !pLock )
+	{
+		m_fActive = FALSE;
+		m_hLockTarget = NULL;
+		m_flNextPrimaryAttack = gpGlobals->time + 0.5f;
 		return;
+	}
 
 	if(( pLock->pev->origin - vecSrc ).Length() > PDA_RANGE || !InSight( pLock, vecSrc ))
 		m_fActive = FALSE;

@@ -60,6 +60,24 @@ private:
 LINK_ENTITY_TO_CLASS( func_handoverhand, CNFTraversalBrush )
 LINK_ENTITY_TO_CLASS( func_huggable, CNFTraversalBrush )
 
+class CNFTriggerToFirst : public CPointEntity
+{
+public:
+	int ObjectCaps( void ) { return 0; }
+	void Use( CBaseEntity *activator, CBaseEntity *caller, USE_TYPE type, float value );
+};
+
+LINK_ENTITY_TO_CLASS( trigger_to_first, CNFTriggerToFirst )
+
+void CNFTriggerToFirst::Use( CBaseEntity *activator, CBaseEntity *caller, USE_TYPE type, float value )
+{
+	// Retail ignores the activator and always releases player 1.
+	CBasePlayer *player = (CBasePlayer *)UTIL_PlayerByIndex( 1 );
+	if( !player || ( !player->m_iNFTraversalState && !player->pev->iuser4 )) return;
+	player->pev->movetype = MOVETYPE_WALK;
+	NF_TraversalReset( player, TRUE );
+}
+
 TYPEDESCRIPTION CNFTraversalBrush::m_SaveData[] =
 {
 	DEFINE_FIELD( CNFTraversalBrush, m_firstTarget, FIELD_STRING ),

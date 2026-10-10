@@ -78,8 +78,10 @@ CNightfireFrinesi g_nfFrinesi;
 CNightfireL96 g_nfL96;
 CNightfireL96Winter g_nfL96Winter;
 CNightfireMinigun g_nfMinigun;
+CNightfireUP11 g_nfUP11;
 CNightfireFragGrenade g_nfFrag;
 CNightfireFlashGrenade g_nfFlash;
+CNightfireSmokeGrenade g_nfSmoke;
 CCrowbar g_Crowbar;
 CPython g_Python;
 CMP5 g_Mp5;
@@ -647,8 +649,10 @@ void HUD_InitClientWeapons( void )
 	HUD_PrepEntity( &g_nfL96, &player );
 	HUD_PrepEntity( &g_nfL96Winter, &player );
 	HUD_PrepEntity( &g_nfMinigun, &player );
+	HUD_PrepEntity( &g_nfUP11, &player );
 	HUD_PrepEntity( &g_nfFrag, &player );
 	HUD_PrepEntity( &g_nfFlash, &player );
+	HUD_PrepEntity( &g_nfSmoke, &player );
 }
 
 /*
@@ -747,11 +751,17 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 		case NF_WEAPON_MINIGUN:
 			pWeapon = &g_nfMinigun;
 			break;
+		case NF_WEAPON_UP11:
+			pWeapon = &g_nfUP11;
+			break;
 		case NF_WEAPON_FRAGGRENADE:
 			pWeapon = &g_nfFrag;
 			break;
 		case NF_WEAPON_FLASHGRENADE:
 			pWeapon = &g_nfFlash;
+			break;
+		case NF_WEAPON_SMOKEGRENADE:
+			pWeapon = &g_nfSmoke;
 			break;
 	}
 
@@ -882,7 +892,7 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 	if( ( player.pev->deadflag != ( DEAD_DISCARDBODY + 1 ) ) && 
 		 !CL_IsDead() && player.pev->viewmodel && !g_iUser1 )
 	{
-		if( player.m_flNextAttack <= 0 && !to->client.iuser4 )
+		if( player.m_flNextAttack <= 0 && !to->client.iuser4 && !( from->client.flags & FL_FROZEN ))
 		{
 			pWeapon->ItemPostFrame();
 		}
@@ -892,7 +902,7 @@ void HUD_WeaponsPostThink( local_state_s *from, local_state_s *to, usercmd_t *cm
 	to->client.m_iId = from->client.m_iId;
 
 	// Now see if we issued a changeweapon command ( and we're not dead )
-	if( cmd->weaponselect && !to->client.iuser4 && ( player.pev->deadflag != ( DEAD_DISCARDBODY + 1 ) ) )
+	if( cmd->weaponselect && !to->client.iuser4 && !( from->client.flags & FL_FROZEN ) && ( player.pev->deadflag != ( DEAD_DISCARDBODY + 1 ) ) )
 	{
 		// Switched to a different weapon?
 		if( from->weapondata[cmd->weaponselect].m_iId == cmd->weaponselect )

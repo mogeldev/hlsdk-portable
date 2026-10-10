@@ -1,3 +1,4 @@
+#include "nf_vision.h"
 /***
 *
 *	Copyright (c) 1996-2002, Valve LLC. All rights reserved.
@@ -18,6 +19,7 @@
 
 #include "hud.h"
 #include "cl_util.h"
+#include "nf_wheel.h"
 #include "parsemsg.h"
 #include "r_efx.h"
 
@@ -34,6 +36,7 @@ extern float g_lastFOV;			// Vit_amiN
 int CHud::MsgFunc_ResetHUD( const char *pszName, int iSize, void *pbuf )
 {
 	ASSERT( iSize == 0 );
+	NF_VisionReset();
 
 	// clear all hud data
 	HUDLIST *pList = m_pHudList;
@@ -68,6 +71,7 @@ void CHud::MsgFunc_ViewMode( const char *pszName, int iSize, void *pbuf )
 
 void CHud::MsgFunc_InitHUD( const char *pszName, int iSize, void *pbuf )
 {
+	NF_WheelMapReset();
 	// prepare all hud data
 	HUDLIST *pList = m_pHudList;
 

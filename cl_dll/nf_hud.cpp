@@ -71,7 +71,8 @@ enum
 	NF_AMMO_NONE = 0,
 	NF_AMMO_IMAGE,		// circle + clip image only
 	NF_AMMO_STAGGERED,	// + back / front rounds (clip, y0 front, y1 back, step)
-	NF_AMMO_CLIP		// + front rounds (clip, y0, step, div)
+	NF_AMMO_CLIP,		// + front rounds (clip, y0, step, div)
+	NF_AMMO_CYLINDER
 };
 
 typedef struct
@@ -94,7 +95,7 @@ static const nf_ammopanel_t s_ammoPanels[32] =
 	{ NF_AMMO_STAGGERED, "ammo_pdw90", 50, 113, 113, 2 },	// 8 P90
 	{ NF_AMMO_CLIP, "ammo_minigun", 100, 42, 2, 5 },	// 9 minigun
 	{ NF_AMMO_CLIP, "ammo_shotgun", 8, 113, 7, 1 },		// 10 Frinesi
-	{ NF_AMMO_IMAGE, "ammo_up11" },				// 11 UP11 (retail: cylinder panel)
+	{ NF_AMMO_CYLINDER, "ammo_up11", 5 },			// 11 UP11
 	{ NF_AMMO_STAGGERED, "ammo_l96a1", 10, 95, 95, 5 },	// 12 L96A1
 	{ NF_AMMO_STAGGERED, "ammo_l96a1", 10, 95, 95, 5 },	// 13 L96A1 winter
 	{ NF_AMMO_IMAGE, "ammo_smoke" },			// 14
@@ -102,8 +103,8 @@ static const nf_ammopanel_t s_ammoPanels[32] =
 	{ NF_AMMO_IMAGE, "ammo_frag" },				// 16
 	{ NF_AMMO_IMAGE, "ammo_trip" },				// 17
 	{ NF_AMMO_IMAGE, "ammo_ronin" },			// 18 Ronin
-	{ NF_AMMO_IMAGE, "ammo_grenade_launcher" },		// 19 (retail: cylinder panel)
-	{ NF_AMMO_IMAGE, "ammo_rocket" },			// 20 (retail: cylinder panel)
+	{ NF_AMMO_CYLINDER, "ammo_grenade_launcher", 6 },	// 19
+	{ NF_AMMO_CYLINDER, "ammo_rocket", 4 },		// 20
 	{ NF_AMMO_IMAGE, "ammo_battery" },			// 21 watch
 	{ NF_AMMO_IMAGE, "ammo_battery" },			// 22 taser
 	{ NF_AMMO_IMAGE, "ammo_dart" },				// 23 pen
@@ -122,6 +123,7 @@ static HSPRITE s_hIrisCircle, s_hIris[9], s_hIrisFlash;
 static HSPRITE s_hAmmoCircle, s_hCrosshair, s_hSniperScope;
 static int s_iScopeWeapon, s_iScopeFOV;
 static HSPRITE s_hClip[32], s_hBack[32], s_hFront[32];
+static HSPRITE s_hCylinder[32][6];
 static bool s_bLoaded;
 
 // use icon (0x41040c40): index 1-5, 0 = hidden
@@ -263,11 +265,20 @@ void NF_HudVidInit( void )
 	{
 		const nf_ammopanel_t *p = &s_ammoPanels[i];
 		s_hClip[i] = s_hBack[i] = s_hFront[i] = 0;
+		memset( s_hCylinder[i], 0, sizeof( s_hCylinder[i] ) );
 		if( p->type == NF_AMMO_NONE )
 			continue;
 
 		snprintf( name, sizeof( name ), "gui/hud/640_%s_clip.png", p->name );
 		s_hClip[i] = SPR_Load( name );
+		if( p->type == NF_AMMO_CYLINDER )
+		{
+			for( int frame = 0; frame < p->clip && frame < 6; frame++ )
+			{
+				snprintf( name, sizeof( name ), "gui/hud/640_%s_clip_%02d.png", p->name, frame );
+				s_hCylinder[i][frame] = SPR_Load( name );
+			}
+		}
 		if( p->type == NF_AMMO_STAGGERED )
 		{
 			snprintf( name, sizeof( name ), "gui/hud/640_%s_clip_back.png", p->name );
@@ -430,7 +441,14 @@ static void NF_DrawAmmo( void )
 	if( p->type == NF_AMMO_NONE )
 		return;
 
+	int rounds = gHUD.m_Ammo.GetCurrentWeaponClip();
 	HSPRITE clip = s_hClip[id - 1];
+	if( p->type == NF_AMMO_CYLINDER && rounds > 0 && rounds <= p->clip )
+	{
+		// Retail CCylinderAmmoPanel selects the texture at capacity - rounds.
+		HSPRITE cylinder = s_hCylinder[id - 1][p->clip - rounds];
+		if( cylinder ) clip = cylinder;
+	}
 	int w = clip ? NF_SpriteW( clip ) : NF_SpriteW( s_hAmmoCircle );
 	int h = clip ? NF_SpriteH( clip ) : NF_SpriteH( s_hAmmoCircle );
 	int x = ScreenWidth - w, y = ScreenHeight - h;
@@ -439,7 +457,6 @@ static void NF_DrawAmmo( void )
 	NF_DrawQuad( s_hAmmoCircle, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, s_colors[0], 1.0f );
 	NF_DrawImage( clip, x, y, w, h, 1.0f );
 
-	int rounds = gHUD.m_Ammo.GetCurrentWeaponClip();
 	if( rounds >= 0 && p->clip > 0 )
 	{
 		int gone = p->clip - rounds;

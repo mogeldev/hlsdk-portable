@@ -3254,6 +3254,12 @@ void PM_PlayerMove( qboolean server )
 	// Store off the starting water level
 	pmove->oldwaterlevel = pmove->waterlevel;
 
+	if( atoi( pmove->PM_Info_ValueForKey( pmove->physinfo, "nf_deathcam" )))
+	{
+		VectorClear( pmove->velocity );
+		pmove->cmd.buttons = 0;
+		return;
+	}
 	if( PM_TraversalMove() ) return;
 
 	// If we are not on ground, store off how fast we are moving down

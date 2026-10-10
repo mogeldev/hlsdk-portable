@@ -41,6 +41,11 @@
 #include "nf_lasertarget.h"
 #include "nf_debug.h"
 #include "nf_traversal.h"
+#include "nf_inventory.h"
+#include "nf_itemmeta.h"
+#include "nf_items.h"
+#include "nf_deathcamera.h"
+#include "nf_gadgets.h"
 
 // #define DUCKFIX
 
@@ -115,13 +120,16 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_iExtraSoundTypes, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iWeaponFlash, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_fLongJump, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CBasePlayer, m_fNFSpaceSuit, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CBasePlayer, m_fInitHUD, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CBasePlayer, m_fNFOddjob, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CBasePlayer, m_tbdPrev, FIELD_TIME ),
 
 	DEFINE_FIELD( CBasePlayer, m_pTank, FIELD_EHANDLE ),
 	DEFINE_FIELD( CBasePlayer, m_iHideHUD, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iFOV, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_flNFEquipTime, FIELD_TIME ),
+	DEFINE_FIELD( CBasePlayer, m_flNFWeaponsFullNext, FIELD_TIME ),
 	DEFINE_FIELD( CBasePlayer, m_iNFBondMoments, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iNFSecrets, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iNFShotsTaken, FIELD_INTEGER ),
@@ -132,6 +140,14 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_iNFTotalMoments, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iNFTotalSecrets, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_flNFMissionStart, FIELD_TIME ),
+	DEFINE_FIELD( CBasePlayer, m_hNFDeathCamera, FIELD_EHANDLE ),
+	DEFINE_FIELD( CBasePlayer, m_hNFDeathCameraWeapon, FIELD_EHANDLE ),
+	DEFINE_FIELD( CBasePlayer, m_fNFDeathCamera, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CBasePlayer, m_iNFDeathCameraHUD, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFDeathCameraFlags, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFDeathCameraEffects, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFDeathCameraViewModel, FIELD_MODELNAME ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFDeathCameraWeaponModel, FIELD_MODELNAME ),
 	DEFINE_FIELD( CBasePlayer, m_hNFTraversalBrush, FIELD_EHANDLE ),
 	DEFINE_FIELD( CBasePlayer, m_hNFTraversalWeapon, FIELD_EHANDLE ),
 	DEFINE_FIELD( CBasePlayer, m_iNFTraversalState, FIELD_INTEGER ),
@@ -217,6 +233,8 @@ int gmsgNFPlayMovie = 0;
 int gmsgNFObjective = 0;
 int gmsgNFSetHudIcon = 0;
 int gmsgNFProgress = 0;
+int gmsgNFVisionMode = 0;
+int gmsgNFCameraMode = 0;
 int gmsgNFShowStinger = 0;
 int gmsgNFScoreInfoS = 0;
 int gmsgNFFog = 0;
@@ -248,6 +266,8 @@ void LinkUserMessages( void )
 	gmsgSayText = REG_USER_MSG( "SayText", -1 );
 	gmsgTextMsg = REG_USER_MSG( "TextMsg", -1 );
 	gmsgWeaponList = REG_USER_MSG( "WeaponList", -1 );
+	gmsgNFItemInfo = REG_USER_MSG( "NFItemInfo", 4 );
+	gmsgNFWheelLock = REG_USER_MSG( "NFWheelLock", 1 );
 	gmsgResetHUD = REG_USER_MSG( "ResetHUD", 1 );		// called every respawn
 	gmsgInitHUD = REG_USER_MSG( "InitHUD", 0 );		// called every time a new player joins the server
 	gmsgShowGameTitle = REG_USER_MSG( "GameTitle", 1 );
@@ -283,6 +303,8 @@ void LinkUserMessages( void )
 
 	// Nightfire HUD use icon (trigger_changelevelicon): 0 off, 2 level change
 	gmsgNFSetHudIcon = REG_USER_MSG( "SetHudIcon", 1 );
+	gmsgNFVisionMode = REG_USER_MSG( "VisionMode", 1 );
+	gmsgNFCameraMode = REG_USER_MSG( "CameraMode", 1 );
 	gmsgNFProgress = REG_USER_MSG( "Progress", -1 );	// laser target bar: short entindex, coord max, byte visible
 	gmsgNFShowStinger = REG_USER_MSG( "ShowStinger", 0 );	// trigger_bondmoment: the 007 logo for 5 s
 	gmsgNFScoreInfoS = REG_USER_MSG( "ScoreInfoS", -1 );	// mission stats (dlls/nf_scoring.cpp)
@@ -960,6 +982,8 @@ entvars_t *g_pevLastInflictor;  // Set in combat.cpp.  Used to pass the damage i
 
 void CBasePlayer::Killed( entvars_t *pevAttacker, int iGib )
 {
+	NF_GadgetReset( this );
+	NF_DeathCameraReset( this );
 	NF_TraversalReset( this, FALSE );
 	CSound *pSound;
 
@@ -1516,6 +1540,8 @@ void CBasePlayer::StartDeathCam( void )
 
 void CBasePlayer::StartObserver( Vector vecPosition, Vector vecViewAngle )
 {
+	NF_GadgetReset( this );
+	NF_DeathCameraReset( this );
 	NF_TraversalReset( this, FALSE );
 	// clear any clientside entities attached to this player
 	MESSAGE_BEGIN( MSG_PAS, SVC_TEMPENTITY, pev->origin );
@@ -1589,7 +1615,7 @@ void CBasePlayer::StartObserver( Vector vecPosition, Vector vecViewAngle )
 
 void CBasePlayer::PlayerUse( void )
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( IsObserver() )
 		return;
 
@@ -1663,9 +1689,21 @@ void CBasePlayer::PlayerUse( void )
 
 			// This essentially moves the origin of the target to the corner nearest the player to test to see 
 			// if it's "hull" is in the view cone
-			vecLOS = UTIL_ClampVectorToBox( vecLOS, pObject->pev->size * 0.5 );
+			Vector itemPoint;
+			if( NF_ItemUsePoint( pObject, pev->origin, itemPoint ))
+			{
+				if(( itemPoint - pev->origin ).Length() > PLAYER_SEARCH_RADIUS ) continue;
+				NF_ItemUsePoint( pObject, EyePosition(), itemPoint );
+				vecLOS = ( itemPoint - EyePosition() ).Normalize();
+			}
+			else
+				vecLOS = UTIL_ClampVectorToBox( vecLOS, pObject->pev->size * 0.5 );
 
 			flDot = DotProduct( vecLOS , gpGlobals->v_forward );
+			if(( m_afButtonPressed & IN_USE ) && NF_DEBUG( NF_DBG_ITEMS ))
+				ALERT( at_console, "nf_debug: use candidate %s model %s dot %.3f view %.1f %.1f origin %.1f %.1f %.1f\n",
+					STRING( pObject->pev->classname ), STRING( pObject->pev->model ), flDot,
+					pev->v_angle.x, pev->v_angle.y, pev->origin.x, pev->origin.y, pev->origin.z );
 			if( flDot > flMaxDot )
 			{
 				// only if the item is in front of the user
@@ -1954,6 +1992,7 @@ void CBasePlayer::UpdateStatusBar()
 
 void CBasePlayer::PreThink( void )
 {
+	NF_DeathCameraPlayerThink( this );
 	NF_TraversalPreThink( this );
 	int buttonsChanged = ( m_afButtonLast ^ pev->button );	// These buttons have changed this frame
 
@@ -2988,6 +3027,8 @@ ReturnSpot:
 
 void CBasePlayer::Spawn( void )
 {
+	NF_GadgetReset( this );
+	NF_DeathCameraReset( this );
 	NF_TraversalReset( this, FALSE );
 	pev->fuser4 = m_flNFTraversalTimer = 0;
 	m_flStartCharge = gpGlobals->time;
@@ -3011,7 +3052,8 @@ void CBasePlayer::Spawn( void )
 	m_bitsHUDDamage = -1;
 	m_bitsDamageType = 0;
 	m_afPhysicsFlags = 0;
-	m_fLongJump = FALSE;// no longjump module. 
+	m_fLongJump = FALSE;// no longjump module.
+	m_fNFSpaceSuit = FALSE;
 
 	g_engfuncs.pfnSetPhysicsKeyValue( edict(), "slj", "0" );
 	g_engfuncs.pfnSetPhysicsKeyValue( edict(), "hl", "1" );
@@ -3234,13 +3276,21 @@ int CBasePlayer::Restore( CRestore &restore )
 
 	m_nCustomSprayFrames = -1;
 	NF_TraversalRestore( this, !pSaveData->fUseLandmark );
+	if( !pSaveData->fUseLandmark )
+	{
+		NF_GadgetReset( this );
+		NF_DeathCameraReset( this );
+	}
 
 	return status;
 }
 
 void CBasePlayer::SelectNextItem( int iItem )
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( pev->deadflag != DEAD_NO || IsObserver() || ( pev->flags & FL_FROZEN ) ||
+		m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( iItem < 0 || iItem >= MAX_ITEM_TYPES ||
+		( m_pActiveItem && !m_pActiveItem->CanHolster() ) ) return;
 	CBasePlayerItem *pItem;
 
 	pItem = m_rgpPlayerItems[iItem];
@@ -3287,7 +3337,8 @@ void CBasePlayer::SelectNextItem( int iItem )
 
 void CBasePlayer::SelectItem( const char *pstr )
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( pev->deadflag != DEAD_NO || IsObserver() || ( pev->flags & FL_FROZEN ) ||
+		m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( !pstr )
 		return;
 
@@ -3319,6 +3370,8 @@ void CBasePlayer::SelectItem( const char *pstr )
 
 	if( !pItem->CanDeploy())
 		return;
+	if( m_pActiveItem && !m_pActiveItem->CanHolster() )
+		return;
 
 	ResetAutoaim();
 
@@ -3340,7 +3393,8 @@ void CBasePlayer::SelectItem( const char *pstr )
 
 void CBasePlayer::SelectLastItem( void )
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( pev->deadflag != DEAD_NO || IsObserver() || ( pev->flags & FL_FROZEN ) ||
+		m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( !m_pLastItem )
 	{
 		return;
@@ -3881,6 +3935,9 @@ int CBasePlayer::AddPlayerItem( CBasePlayerItem *pItem )
 		pInsert = pInsert->m_pNext;
 	}
 
+	if( !NF_CanAddItem( this, pItem ) )
+		return FALSE;
+
 	if( pItem->AddToPlayer( this ) )
 	{
 		g_pGameRules->PlayerGotWeapon( this, pItem );
@@ -3999,7 +4056,7 @@ Called every frame by the player PreThink
 */
 void CBasePlayer::ItemPreFrame()
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
 #if CLIENT_WEAPONS
 	if( m_flNextAttack > 0 )
 #else
@@ -4024,7 +4081,7 @@ Called every frame by the player PostThink
 */
 void CBasePlayer::ItemPostFrame()
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
 	//static int fInSelect = FALSE;
 
 	// check if the player is using a tank
@@ -4120,10 +4177,12 @@ void CBasePlayer::UpdateClientData( void )
 	{
 		m_fInitHUD = FALSE;
 		gInitHUD = FALSE;
+		m_iNFWheelLockSent = -1;
 
 		MESSAGE_BEGIN( MSG_ONE, gmsgResetHUD, NULL, pev );
 			WRITE_BYTE( 0 );
 		MESSAGE_END();
+		NF_GadgetSync( this );
 
 		if( !m_fGameHUDInitialized )
 		{
@@ -4254,8 +4313,11 @@ void CBasePlayer::UpdateClientData( void )
 		m_bitsDamageType &= DMG_TIMEBASED;
 	}
 
+	// Update Nightfire Q-Specs battery with retail mode cadence, separately from flashlight state.
+	const BOOL gadgetBattery = NF_GadgetBatteryThink( this );
+
 	// Update Flashlight
-	if( ( m_flFlashLightTime ) && ( m_flFlashLightTime <= gpGlobals->time ) )
+	if( !gadgetBattery && ( m_flFlashLightTime ) && ( m_flFlashLightTime <= gpGlobals->time ) )
 	{
 		if( FlashlightIsOn() )
 		{
@@ -4343,9 +4405,17 @@ void CBasePlayer::UpdateClientData( void )
 				WRITE_BYTE( II.iId );						// byte		id (bit index into pev->weapons)
 				WRITE_BYTE( II.iFlags );					// byte		Flags
 			MESSAGE_END();
+			const nf_itemmeta_t *meta = NF_ItemMeta( II.iId, II.pszName );
+			MESSAGE_BEGIN( MSG_ONE, gmsgNFItemInfo, NULL, pev );
+				WRITE_BYTE( II.iId );
+				WRITE_BYTE( meta ? meta->wheel : NF_WHEEL_NONE );
+				WRITE_BYTE( meta ? meta->selectable : 0 );
+				WRITE_BYTE( meta ? meta->firearm : 0 );
+			MESSAGE_END();
 		}
 	}
 
+	NF_SendWheelLock( this );
 	SendAmmoUpdate();
 
 	// Update all the items
@@ -4693,12 +4763,9 @@ int CBasePlayer::GetCustomDecalFrames( void )
 //=========================================================
 void CBasePlayer::DropPlayerItem( char *pszItemName )
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
-	if( !g_pGameRules->IsMultiplayer() || ( weaponstay.value > 0 ) )
-	{
-		// no dropping in single player.
-		return;
-	}
+	if( pev->deadflag != DEAD_NO || IsObserver() || ( pev->flags & FL_FROZEN ) ||
+		m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return;
+	if( g_pGameRules->IsMultiplayer() && weaponstay.value > 0 ) return;
 
 	if( pszItemName[0] == '\0' )
 	{
@@ -4743,10 +4810,24 @@ void CBasePlayer::DropPlayerItem( char *pszItemName )
 		// item we want to drop and hit a BREAK;  pWeapon is the item.
 		if( pWeapon )
 		{
-			if( !g_pGameRules->GetNextBestWeapon( this, pWeapon ) )
-				return; // can't drop the item they asked for, may be our last item or something we can't holster
+			const nf_itemmeta_t *meta = NF_ItemMeta( pWeapon->m_iId, STRING( pWeapon->pev->classname ) );
+			if( !g_pGameRules->IsMultiplayer() )
+			{
+				// Campaign equipment stays owned; only firearms can be discarded.
+				if( !meta || !meta->firearm || !pWeapon->CanHolster() ) return;
+				if( pWeapon == m_pActiveItem && !HLGetNextBestWeapon( this, pWeapon ) )
+				{
+					CBasePlayerItem *fallback = NULL;
+					for( int bucket = 0; bucket < MAX_ITEM_TYPES && !fallback; bucket++ )
+						for( CBasePlayerItem *candidate = m_rgpPlayerItems[bucket]; candidate; candidate = candidate->m_pNext )
+							if( candidate != pWeapon && candidate->CanDeploy() ) { fallback = candidate; break; }
+					if( !fallback || !SwitchWeapon( fallback ) ) return;
+				}
+			}
+			else if( !g_pGameRules->GetNextBestWeapon( this, pWeapon ) )
+				return;
 
-			UTIL_MakeVectors( pev->angles ); 
+			UTIL_MakeVectors( pev->v_angle );
 
 			pev->weapons &= ~( 1 << pWeapon->m_iId );// take item off hud
 
@@ -4857,7 +4938,9 @@ BOOL CBasePlayer::HasPlayerItemFromID( int nID )
 //=========================================================
 BOOL CBasePlayer::SwitchWeapon( CBasePlayerItem *pWeapon ) 
 {
-	if( pev->iuser4 || m_fNFTraversalHolstered ) return FALSE;
+	if( pev->deadflag != DEAD_NO || IsObserver() || ( pev->flags & FL_FROZEN ) ||
+		m_hNFDeathCamera || pev->iuser4 || m_fNFTraversalHolstered ) return FALSE;
+	if( !pWeapon || ( m_pActiveItem && !m_pActiveItem->CanHolster() ) ) return FALSE;
 	if( !pWeapon->CanDeploy() )
 	{
 		return FALSE;

@@ -32,6 +32,7 @@
 #include "gamerules.h"
 #include "nf_materials.h"
 #include "nf_debug.h"
+#include "nf_inventory.h"
 
 extern CGraph WorldGraph;
 extern int gEvilImpulse101;
@@ -381,18 +382,31 @@ void W_Precache( void )
 	UTIL_PrecacheOtherWeapon( "weapon_l96a1_winter" );
 	UTIL_PrecacheOther( "ammo_sniper" );
 	UTIL_PrecacheOtherWeapon( "weapon_minigun" );
+	UTIL_PrecacheOtherWeapon( "weapon_up11" );
+	UTIL_PrecacheOtherWeapon( "weapon_laserrifle" );
+	UTIL_PrecacheOther( "ammo_up11" );
 	UTIL_PrecacheOther( "ammo_mini" );
 	UTIL_PrecacheOtherWeapon( "weapon_fraggrenade" );	// dlls/nf_grenades.cpp; ammo_* is the same class
 	UTIL_PrecacheOtherWeapon( "weapon_flashgrenade" );
+	UTIL_PrecacheOtherWeapon( "weapon_smokegrenade" );
+	UTIL_PrecacheOtherWeapon( "weapon_bondmine" );
+	UTIL_PrecacheOtherWeapon( "weapon_ronin" );
+	UTIL_PrecacheOtherWeapon( "weapon_grenadelauncher" );
+	UTIL_PrecacheOtherWeapon( "weapon_rocketlauncher" );
+	UTIL_PrecacheOther( "ammo_grenadelauncher" );
+	UTIL_PrecacheOther( "ammo_rocketlauncher" );
 	UTIL_PrecacheOtherWeapon( "weapon_watch" );	// dlls/nf_watch.cpp
 	UTIL_PrecacheOtherWeapon( "weapon_taser" );	// dlls/nf_taser.cpp
 	UTIL_PrecacheOtherWeapon( "weapon_grapple" );	// dlls/nf_grapple.cpp
+	UTIL_PrecacheOtherWeapon( "weapon_dukes" );
+	UTIL_PrecacheOtherWeapon( "weapon_pen" );
+	UTIL_PrecacheOtherWeapon( "weapon_lighter" );
+	UTIL_PrecacheOtherWeapon( "weapon_qworm" );
+	UTIL_PrecacheOtherWeapon( "gadget_nightvision" );
 	UTIL_PrecacheOtherWeapon( "weapon_pda" );	// dlls/nf_pda.cpp
 
-	if( g_pGameRules->IsDeathmatch() )
-	{
-		UTIL_PrecacheOther( "weaponbox" );// container for dropped deathmatch weapons
-	}
+	UTIL_PrecacheOther( "weaponbox" );
+	UTIL_PrecacheOther( "weaponbag" );
 
 	g_sModelIndexFireball = PRECACHE_MODEL( "sprites/zerogxplode.spr" );// fireball
 	g_sModelIndexWExplosion = PRECACHE_MODEL( "sprites/WXplo1.spr" );// underwater fireball
@@ -1415,30 +1429,26 @@ void CWeaponBox::Touch( CBaseEntity *pOther )
 		}
 	}
 
-	// go through my weapons and try to give the usable ones to the player. 
-	// it's important the the player be given ammo first, so the weapons code doesn't refuse 
-	// to deploy a better weapon that the player may pick up because he has no ammo for it.
+	BOOL retained = FALSE;
 	for( i = 0; i < MAX_ITEM_TYPES; i++ )
 	{
-		if( m_rgpPlayerItems[i] )
+		CBasePlayerItem **link = &m_rgpPlayerItems[i];
+		while( *link )
 		{
-			CBasePlayerItem *pItem;
-
-			// have at least one weapon in this slot
-			while( m_rgpPlayerItems[i] )
+			CBasePlayerItem *item = *link;
+			if( !NF_CanAddItem( pPlayer, item ) )
 			{
-				//ALERT( at_console, "trying to give %s\n", STRING( m_rgpPlayerItems[i]->pev->classname ) );
-
-				pItem = m_rgpPlayerItems[i];
-				m_rgpPlayerItems[i] = m_rgpPlayerItems[i]->m_pNext;// unlink this weapon from the box
-
-				if( pPlayer->AddPlayerItem( pItem ) )
-				{
-					pItem->AttachToPlayer( pPlayer );
-				}
+				retained = TRUE;
+				link = &item->m_pNext;
+				continue;
 			}
+			*link = item->m_pNext;
+			if( pPlayer->AddPlayerItem( item ) )
+				item->AttachToPlayer( pPlayer );
 		}
 	}
+	if( retained )
+		return;
 
 	EMIT_SOUND( pOther->edict(), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM );
 	SetTouch( NULL );

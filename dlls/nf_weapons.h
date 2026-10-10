@@ -13,6 +13,11 @@ repo (mogeldev/nightfire-xash3d).
 
 // The retail weapon ids (m_iId in each Spawn / GetItemInfo). They overlap the
 // Half-Life ids, so W_Precache no longer registers the Half-Life weapons.
+#define NF_WEAPON_DUKES		1
+#define NF_WEAPON_PEN		23
+#define NF_WEAPON_LIGHTER	25
+#define NF_WEAPON_QWORM		27
+#define NF_WEAPON_GLASSES	28
 #define NF_WEAPON_PP9		2
 #define NF_WEAPON_KOWLOON	3
 #define NF_WEAPON_RAPTOR	4
@@ -22,8 +27,15 @@ repo (mogeldev/nightfire-xash3d).
 #define NF_WEAPON_PDW90		8	// P90
 #define NF_WEAPON_MINIGUN	9
 #define NF_WEAPON_FRINESI	10
+#define NF_WEAPON_UP11		11
+#define NF_WEAPON_LASERRIFLE	29
 #define NF_WEAPON_L96A1		12
 #define NF_WEAPON_L96A1_WINTER	13
+#define NF_WEAPON_SMOKEGRENADE	14
+#define NF_WEAPON_BONDMINE	17
+#define NF_WEAPON_RONIN		18
+#define NF_WEAPON_GRENADELAUNCHER	19
+#define NF_WEAPON_ROCKETLAUNCHER	20
 #define NF_WEAPON_FLASHGRENADE	15
 #define NF_WEAPON_FRAGGRENADE	16
 #define NF_WEAPON_WATCH		21	// dlls/nf_watch.cpp (server only)
@@ -44,6 +56,11 @@ float NF_SkillValue( const char *base );	// dlls/nf_enemy.cpp
 class CNightfirePP9 : public CBasePlayerWeapon
 {
 public:
+#ifndef CLIENT_DLL
+	int Save( CSave &save );
+	int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+#endif
 	void Spawn( void );
 	void Precache( void );
 	int iItemSlot( void ) { return 2; }
@@ -76,6 +93,13 @@ class CNightfireGun : public CBasePlayerWeapon
 {
 public:
 	virtual const nf_gun_info_t *Info( void ) = 0;
+#ifndef CLIENT_DLL
+	int Save( CSave &save );
+	int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+	void UpdateOnRemove( void );
+#endif
+	void ItemPostFrame( void );
 
 	void Spawn( void );
 	void Precache( void );
@@ -109,6 +133,18 @@ protected:
 	int Body( void ) { return Info()->mode_body ? m_fireState : 0; }
 
 	unsigned short m_usFire;
+#ifndef CLIENT_DLL
+	void UpdateSight( void );
+	void RemoveSight( void );
+	EHANDLE m_hSight;
+#endif
+};
+
+class CNightfireUP11 : public CNightfireGun
+{
+public:
+	const nf_gun_info_t *Info( void ) { return &g_nfGunUP11; }
+	void PrimaryAttack( void );
 };
 
 #define NF_DECLARE_GUN( cls, info ) \
@@ -199,6 +235,7 @@ typedef struct nf_grenade_info_s
 
 extern const nf_grenade_info_t g_nfFragGrenade;
 extern const nf_grenade_info_t g_nfFlashGrenade;
+extern const nf_grenade_info_t g_nfSmokeGrenade;
 
 // m_flStartThrow: pin pulled (time), m_flReleaseThrow: trigger let go
 // (time, -1 after a draw); m_fInAttack (iuser2): throw animation started;
@@ -218,6 +255,11 @@ public:
 	void SecondaryAttack( void ) { PullPin( 1 ); }
 	BOOL Deploy( void );
 	BOOL CanHolster( void ) { return m_flStartThrow == 0.0f; }
+#if !CLIENT_DLL
+	int Save( CSave &save );
+	int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+#endif
 	void Holster( int skiplocal = 0 );
 	void WeaponIdle( void );
 
@@ -245,6 +287,12 @@ class CNightfireFlashGrenade : public CNightfireHandGrenade
 {
 public:
 	const nf_grenade_info_t *Info( void ) { return &g_nfFlashGrenade; }
+};
+
+class CNightfireSmokeGrenade : public CNightfireHandGrenade
+{
+public:
+	const nf_grenade_info_t *Info( void ) { return &g_nfSmokeGrenade; }
 };
 
 #endif // NF_WEAPONS_H

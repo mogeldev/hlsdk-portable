@@ -25,6 +25,7 @@
 #include	"teamplay_gamerules.h"
 #include	"skill.h"
 #include	"game.h"
+#include "nf_inventory.h"
 
 extern edict_t *EntSelectSpawnPoint( CBaseEntity *pPlayer );
 
@@ -80,6 +81,9 @@ BOOL CGameRules::CanHavePlayerItem( CBasePlayer *pPlayer, CBasePlayerItem *pWeap
 {
 	// only living players can have items
 	if( pPlayer->pev->deadflag != DEAD_NO )
+		return FALSE;
+
+	if( !NF_CanAddItem( pPlayer, pWeapon ) )
 		return FALSE;
 
 	if( pWeapon->pszAmmo1() )

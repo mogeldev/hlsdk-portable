@@ -20,6 +20,7 @@
 #include "pmtrace.h"	
 #include "pm_shared.h"
 #include "nf_searchlight.h"
+#include "nf_vision.h"
 
 void Game_AddObjects( void );
 
@@ -48,6 +49,7 @@ HUD_AddEntity
 int DLLEXPORT HUD_AddEntity( int type, struct cl_entity_s *ent, const char *modelname )
 {
 	NF_SearchlightEntity( ent );
+	NF_VisionEntity( ent );
 	switch( type )
 	{
 	case ET_NORMAL:

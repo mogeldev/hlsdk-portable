@@ -1,3 +1,4 @@
+#include "nf_vision.h"
 /***
 *
 *	Copyright (c) 1996-2002, Valve LLC. All rights reserved.
@@ -22,6 +23,7 @@
 #include "cl_util.h"
 #include "nf_hudmsg.h"
 #include "nf_hud.h"
+#include "nf_wheel.h"
 //#include "triangleapi.h"
 
 #include "vgui_TeamFortressViewport.h"
@@ -168,6 +170,8 @@ int CHud::Redraw( float flTime, int intermission )
 			NF_HudDraw( flTime );
 		else
 			DrawNightfireStatus();
+		NF_WheelDraw( flTime, intermission );
+		NF_VisionDraw( flTime );
 		NF_HudMsgDraw( flTime );
 		return 1;
 	}
@@ -235,6 +239,8 @@ int CHud::Redraw( float flTime, int intermission )
 		if( !intermission )
 			NF_HudMsgDraw( flTime );
 	}
+
+	NF_WheelDraw( flTime, intermission );
 
 	// are we in demo mode? do we need to draw the logo in the top corner?
 	if( m_iLogo )

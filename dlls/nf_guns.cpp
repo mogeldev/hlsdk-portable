@@ -25,6 +25,20 @@ Built into the server and the client (weapon prediction).
 #include "player.h"
 #include "nf_weapons.h"
 #include "nf_debug.h"
+#ifndef CLIENT_DLL
+#include "effects.h"
+extern void NF_ShootUP11( CBasePlayer *player );
+
+TYPEDESCRIPTION CNightfireGun::m_SaveData[] =
+{
+	DEFINE_FIELD( CNightfireGun, m_fireState, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireGun, m_fInAttack, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireGun, m_fInReload, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireGun, m_fInSpecialReload, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireGun, m_hSight, FIELD_EHANDLE ),
+};
+IMPLEMENT_SAVERESTORE( CNightfireGun, CBasePlayerWeapon )
+#endif
 
 //=========================================================
 // weapon descriptions
@@ -67,7 +81,7 @@ const nf_gun_info_t g_nfGunMP9Silenced =
 // (m_nWeaponMode) 0 = 3-round burst, spread 0.01; 1 = automatic, spread
 // 0.04; the secondary attack switches it (sequences SEMI / AUTO, selector
 // shown by the "switch" bodygroup); reload 1.63 s / 2.13 s (empty). The
-// laser sight (events/commandolaser.sc) is not done yet [open]
+// laser sight is server-authoritative in the zoomed burst mode.
 const nf_gun_info_t g_nfGunCommando =
 {
 	NF_WEAPON_COMMANDO, "weapon_commando",
@@ -78,7 +92,7 @@ const nf_gun_info_t g_nfGunCommando =
 	"sk_plr_commando_bullet", 11, FALSE, "weapons/sig552_fire1.wav", 1.2f,
 	{ 0, 1, -1, -1 }, { 69.0f / 15.0f, 41.0f / 15.0f, 0.0f, 0.0f },
 	2, 5, 6, 4, 3, 1.63f, 2.13f,
-	8, 7, 34.0f / 30.0f, TRUE,
+	8, 7, 0.3f, TRUE,
 	-1, 0.0f, FALSE, 0, FALSE, 0, 0.0f, BULLET_PLAYER_MP5, -1, 0, 0.0f
 };
 
@@ -189,8 +203,8 @@ const nf_gun_info_t g_nfGunL96Winter =
 
 // minigun: retail id 9, ammo "minigun" 200, clip 100, cycle 0.075, spread
 // 0.04, damage sk_plr_minigun_bullet; spin-up 0.66 s, spin-down 1.13 s;
-// reload 4.73 s; idle delay 8-16 s. The laser sight (events/minigunlaser.sc)
-// is not done yet [open]. Retail restarts the 0.2 s "fire" sequence with
+// reload 4.73 s; idle delay 8-16 s. A server-authoritative laser sight is
+// shown while deployed. Retail restarts the 0.2 s "fire" sequence with
 // every shot (client.dll EV_Minigun, 0x4102c5f0), which in Xash3D freezes the
 // barrels on its first frames; here it runs through and the event plays the
 // shot sound in between (fire_anim_time)
@@ -209,12 +223,25 @@ const nf_gun_info_t g_nfGunMinigun =
 	6.0f / 30.0f
 };
 
+const nf_gun_info_t g_nfGunUP11 =
+{
+	NF_WEAPON_UP11, "weapon_up11",
+	"models/v_up11.mdl", "models/p_up11.mdl", "models/w_up11.mdl", "pistol",
+	"up11", 24, 5, 5, 1, 3,
+	0.23f, 0.0f, 0.0f, 0,
+	"", 100, TRUE, "gadgets/grapple_hit.wav", 0.0f,
+	{ 0, 1, 2, -1 }, { 3.75f, 2.5f, 3.0625f, 0.0f },
+	3, 5, 6, 4, 4, 3.3f, 3.3f,
+	-1, -1, 0.0f, FALSE,
+	-1, 0.0f, FALSE, 0, FALSE, 0, 0.0f, BULLET_NONE, -1, 0, 0.0f
+};
+
 const nf_gun_info_t *NF_GunInfo( int id )
 {
 	static const nf_gun_info_t *const guns[] =
 	{
 		&g_nfGunMP9, &g_nfGunMP9Silenced, &g_nfGunCommando, &g_nfGunPDW90, &g_nfGunKowloon,
-		&g_nfGunRaptor, &g_nfGunFrinesi, &g_nfGunL96, &g_nfGunL96Winter, &g_nfGunMinigun
+		&g_nfGunRaptor, &g_nfGunFrinesi, &g_nfGunL96, &g_nfGunL96Winter, &g_nfGunMinigun, &g_nfGunUP11
 	};
 	for( size_t i = 0; i < ARRAYSIZE( guns ); i++ )
 	{
@@ -234,6 +261,7 @@ LINK_ENTITY_TO_CLASS( weapon_frinesi, CNightfireFrinesi )
 LINK_ENTITY_TO_CLASS( weapon_l96a1, CNightfireL96 )
 LINK_ENTITY_TO_CLASS( weapon_l96a1_winter, CNightfireL96Winter )
 LINK_ENTITY_TO_CLASS( weapon_minigun, CNightfireMinigun )
+LINK_ENTITY_TO_CLASS( weapon_up11, CNightfireUP11 )
 
 #ifndef CLIENT_DLL
 // retail buckshot (FireBulletsPlayer bullet type 6, 0x42043318): every
@@ -301,6 +329,10 @@ void CNightfireGun::Precache( void )
 	PRECACHE_SOUND( g->fire_sound );
 	PRECACHE_SOUND( "items/9mmclip1.wav" );
 
+	if( g->id == NF_WEAPON_UP11 )
+		PRECACHE_MODEL( "models/w_up11_dart.mdl" );
+	if( g->id == NF_WEAPON_COMMANDO || g->id == NF_WEAPON_MINIGUN )
+		PRECACHE_MODEL( "sprites/laserdot.spz" );
 	m_usFire = PRECACHE_EVENT( 1, "events/nfgun.sc" );
 }
 
@@ -338,11 +370,18 @@ int CNightfireGun::AddToPlayer( CBasePlayer *pPlayer )
 BOOL CNightfireGun::Deploy( void )
 {
 	m_fInAttack = 0;
+	if( Info()->id == NF_WEAPON_COMMANDO )
+		m_fireState = 1;
 	return DefaultDeploy( Info()->vmodel, Info()->pmodel, Info()->seq_draw, Info()->animext, UseDecrement() ? 1 : 0, Body());
 }
 
 void CNightfireGun::Holster( int skiplocal )
 {
+#ifndef CLIENT_DLL
+	RemoveSight();
+#endif
+	if( Info()->id == NF_WEAPON_COMMANDO )
+		m_pPlayer->pev->fov = m_pPlayer->m_iFOV = 0;
 	m_fInReload = FALSE;
 	m_fInSpecialReload = 0;
 	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.5f;
@@ -451,12 +490,17 @@ void CNightfireGun::SecondaryAttack( void )
 
 	if( g->seq_mode0 < 0 )
 	{
+		if( g->id == NF_WEAPON_MP9 || g->id == NF_WEAPON_MP9_SILENCED )
+			WeaponIdle();
 		m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.5f;
 		return;
 	}
 
 	// switch the fire mode (SIG552: burst <-> automatic)
 	m_fireState = !m_fireState;
+	m_fInAttack = 0;
+	if( g->id == NF_WEAPON_COMMANDO )
+		m_pPlayer->pev->fov = m_pPlayer->m_iFOV = m_fireState ? 0 : 40;
 	SendWeaponAnim( m_fireState ? g->seq_mode1 : g->seq_mode0, UseDecrement() ? 1 : 0, Body());
 
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = GetNextAttackDelay( g->mode_time );
@@ -477,7 +521,88 @@ void CNightfireGun::Reload( void )
 		iResult = DefaultReload( g->max_clip, g->seq_reload, g->reload_time, Body());
 
 	if( iResult )
+	{
+		if( g->id == NF_WEAPON_COMMANDO )
+			m_pPlayer->pev->fov = m_pPlayer->m_iFOV = 0;
 		m_flTimeWeaponIdle = UTIL_WeaponTimeBase() + UTIL_SharedRandomFloat( m_pPlayer->random_seed, 10, 15 );
+	}
+}
+
+void CNightfireGun::ItemPostFrame( void )
+{
+	if( !( m_pPlayer->pev->button & IN_ATTACK ) && Info()->id != NF_WEAPON_MINIGUN )
+		m_fInAttack = 0;
+	CBasePlayerWeapon::ItemPostFrame();
+	if( Info()->id == NF_WEAPON_COMMANDO )
+		m_pPlayer->pev->fov = m_pPlayer->m_iFOV = ( !m_fInReload && !m_fireState ) ? 40 : 0;
+#ifndef CLIENT_DLL
+	UpdateSight();
+#endif
+}
+
+#ifndef CLIENT_DLL
+void CNightfireGun::RemoveSight( void )
+{
+	if( m_hSight )
+		UTIL_Remove( m_hSight );
+	m_hSight = NULL;
+}
+
+void CNightfireGun::UpdateOnRemove( void )
+{
+	RemoveSight();
+	CBasePlayerWeapon::UpdateOnRemove();
+}
+
+void CNightfireGun::UpdateSight( void )
+{
+	if( Info()->id != NF_WEAPON_MINIGUN && Info()->id != NF_WEAPON_COMMANDO )
+		return;
+	if( m_fInReload || m_pPlayer->pev->deadflag != DEAD_NO ||
+		( Info()->id == NF_WEAPON_COMMANDO && m_fireState ))
+	{
+		RemoveSight();
+		return;
+	}
+	if( !m_hSight )
+	{
+		CSprite *spot = CSprite::SpriteCreate( "sprites/laserdot.spz", m_pPlayer->GetGunPosition(), FALSE );
+		if( !spot ) return;
+		spot->SetTransparency( kRenderGlow, 255, 0, 0, 255, kRenderFxNoDissipation );
+		spot->pev->scale = 0.1f;
+		spot->pev->owner = m_pPlayer->edict();
+		m_hSight = spot;
+	}
+	UTIL_MakeVectors( m_pPlayer->pev->v_angle + m_pPlayer->pev->punchangle );
+	TraceResult tr;
+	Vector src = m_pPlayer->GetGunPosition();
+	UTIL_TraceLine( src, src + gpGlobals->v_forward * 8192, dont_ignore_monsters, m_pPlayer->edict(), &tr );
+	UTIL_SetOrigin( m_hSight->pev, tr.vecEndPos + tr.vecPlaneNormal * 0.5f );
+	if( tr.flFraction == 1 ) m_hSight->pev->effects |= EF_NODRAW;
+	else m_hSight->pev->effects &= ~EF_NODRAW;
+}
+#endif
+
+void CNightfireUP11::PrimaryAttack( void )
+{
+	if( m_iClip <= 0 )
+	{
+		PlayEmptySound();
+		m_flNextPrimaryAttack = GetNextAttackDelay( 0.2f );
+		return;
+	}
+	--m_iClip;
+	m_pPlayer->m_iWeaponVolume = QUIET_GUN_VOLUME;
+	m_pPlayer->m_iWeaponFlash = DIM_GUN_FLASH;
+	m_pPlayer->SetAnimation( PLAYER_ATTACK1 );
+#ifndef CLIENT_DLL
+	NF_ShootUP11( m_pPlayer );
+	if( NF_DEBUG( NF_DBG_WEAPONS ))
+		ALERT( at_console, "nf_debug: up11 fire clip %d damage 100 speed 2000\n", m_iClip );
+#endif
+	SendWeaponAnim( 3, UseDecrement() ? 1 : 0 );
+	m_flNextPrimaryAttack = m_flNextSecondaryAttack = GetNextAttackDelay( 0.23f );
+	m_flTimeWeaponIdle = UTIL_WeaponTimeBase() + UTIL_SharedRandomFloat( m_pPlayer->random_seed, 10, 15 );
 }
 
 void CNightfireGun::WeaponIdle( void )
@@ -839,6 +964,8 @@ NF_AMMO( CNightfireAmmoRaptor, "models/w_ammo_raptor.mdl", "440", 9, 72 )
 NF_AMMO( CNightfireAmmoShotgun, "models/w_ammo_shotgun.mdl", "buckshot", 20, 125 )
 NF_AMMO( CNightfireAmmoSniper, "models/w_ammo_sniper.mdl", "762mm", 10, 50 )
 NF_AMMO( CNightfireAmmoMinigun, "models/w_ammo_mini.mdl", "minigun", 100, 200 )
+NF_AMMO( CNightfireAmmoUP11, "models/w_ammo_up11.mdl", "up11", 5, 24 )
+LINK_ENTITY_TO_CLASS( ammo_up11, CNightfireAmmoUP11 )
 
 LINK_ENTITY_TO_CLASS( ammo_mp9, CNightfireAmmoMP9 )
 LINK_ENTITY_TO_CLASS( ammo_commando, CNightfireAmmoCommando )

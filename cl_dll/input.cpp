@@ -30,6 +30,8 @@ extern "C"
 
 #include "vgui_TeamFortressViewport.h"
 #include "nf_hudmsg.h"
+#include "nf_wheel.h"
+#include "nf_itemmeta.h"
 
 extern "C" 
 {
@@ -380,8 +382,14 @@ Return 1 to allow engine to process the key, otherwise, act on it as needed
 */
 int DLLEXPORT HUD_Key_Event( int down, int keynum, const char *pszCurrentBinding )
 {
-	if (gViewPort)
-		return gViewPort->KeyInput(down, keynum, pszCurrentBinding);
+	if( gViewPort && !gViewPort->KeyInput( down, keynum, pszCurrentBinding ) ) return 0;
+	// Port defaults only for unbound keys; retail lean keys and user bindings stay intact.
+	if( NF_WheelEnabled() && ( !pszCurrentBinding || !*pszCurrentBinding ) &&
+		( keynum == '2' || keynum == '4' ) )
+	{
+		if( down ) NF_WheelMode( keynum == '2' ? NF_WHEEL_WEAPONS : NF_WHEEL_GADGETS );
+		return 0;
+	}
 	return 1;
 }
 

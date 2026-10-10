@@ -81,6 +81,8 @@ whose cvars are registered by NF_RegisterSkillCvars().
 #include "nf_character.h"
 #include "nf_searchlight.h"
 #include "player.h"
+#include "nf_deathcamera.h"
+#include "nf_explosives.h"
 
 // HLSDK monster spawnflags that Nightfire maps use with the same meaning
 #define NF_ENEMY_SPAWNFLAGS_HL	0x3FF
@@ -119,6 +121,7 @@ enum
 	TASK_NF_COVER_CROUCH,				// retail 131: crouch again
 	TASK_NF_CORNER_FIRE,				// retail 134: step out, fire, step back
 	TASK_NF_TASER,
+	TASK_NF_BLIND,
 };
 
 //=========================================================
@@ -133,7 +136,8 @@ static const char *const g_nfSkillCvars[] =
 	// player weapons (dlls/nf_pp9.cpp, dlls/nf_guns.cpp)
 	"sk_plr_pp9_bullet", "sk_plr_mp9_bullet", "sk_plr_commando_bullet", "sk_plr_pdw90_bullet",
 	"sk_plr_kowloon_bullet", "sk_plr_raptor_bullet", "sk_plr_sniper_bullet",	// sk_plr_buckshot: Half-Life registers it
-	"sk_plr_minigun_bullet", "sk_plr_taser",
+	"sk_plr_minigun_bullet", "sk_plr_taser", "sk_plr_laser", "sk_plr_eigrenade",
+	"sk_plr_rocket", "sk_plr_tripmine", "sk_plr_ronin_charge", "sk_plr_ronin_shoot", "sk_plr_ronin_health",
 };
 
 static cvar_t g_nfSkill[ARRAYSIZE( g_nfSkillCvars ) * 3];
@@ -200,6 +204,9 @@ public:
 	void SetYawSpeed( void );
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	BOOL CheckRangeAttack1( float flDot, float flDist );
+	BOOL CheckRangeAttack2( float flDot, float flDist ) { return m_flBlindUntil <= gpGlobals->time && CHGrunt::CheckRangeAttack2( flDot, flDist ); }
+	BOOL FVisible( CBaseEntity *entity ) { return m_flBlindUntil <= gpGlobals->time && !NF_SmokeOccludes( EyePosition(), entity->BodyTarget( EyePosition() )) && CHGrunt::FVisible( entity ); }
+	BOOL FVisible( const Vector &origin ) { return m_flBlindUntil <= gpGlobals->time && !NF_SmokeOccludes( EyePosition(), origin ) && CHGrunt::FVisible( origin ); }
 	void SetActivity( Activity NewActivity );
 	void PrescheduleThink( void );
 	void PainSound( void );
@@ -215,9 +222,13 @@ public:
 	void ChangeCharacter( const nf_character_change_t &change );
 	void ReportCharacter( void );
 	BOOL CorpseSpotted( BOOL mark ) { BOOL spotted = m_fCorpseSpotted; if( mark ) m_fCorpseSpotted = TRUE; return spotted; }
+	string_t PhotoTarget( void ) { return IsAlive() ? m_iszCameraTarget : 0; }
+	void PhotoPose( BOOL enabled );
+	BOOL m_fPhotoPose;
 	BOOL TaserAcquire( CBaseEntity *weapon );
 	BOOL TaserHeld( CBaseEntity *weapon );
 	void TaserRelease( CBaseEntity *weapon );
+	void Blind( float duration );
 	BOOL FOkToSpeak( void ) { return FALSE; }	// no HG_* sentence groups in Nightfire
 	Schedule_t *GetSchedule( void );
 	Schedule_t *GetScheduleOfType( int Type );
@@ -255,6 +266,7 @@ private:
 	BOOL m_fNFDispatched;
 	BOOL m_fCorpseSpotted;
 	EHANDLE m_hTaserWeapon;
+	float m_flBlindUntil;
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -299,6 +311,7 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_iszDeathCamera, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszRescueTarget, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszCameraTarget, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_fPhotoPose, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszCharName, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iWeapon, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_iGunIndex, FIELD_INTEGER ),
@@ -328,11 +341,37 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_fNFDispatched, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_fCorpseSpotted, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_hTaserWeapon, FIELD_EHANDLE ),
+	DEFINE_FIELD( CNightfireEnemy, m_flBlindUntil, FIELD_TIME ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
 
 LINK_ENTITY_TO_CLASS( enemy_generic, CNightfireEnemy )
+
+// Narrow camera/mission-use recipient, not the retail talk/follow NPC implementation.
+class CNFPhotoNPC : public CNightfireEnemy
+{
+public:
+	int Classify( void ) { return CLASS_HUMAN_PASSIVE; }
+	int ObjectCaps( void ) { return CNightfireEnemy::ObjectCaps() | FCAP_IMPULSE_USE; }
+	void Spawn( void ) { CNightfireEnemy::Spawn(); m_afCapability &= ~bits_CAP_SQUAD; SetUse( &CNFPhotoNPC::NPCUse ); }
+	void KeyValue( KeyValueData *kv )
+	{
+		if( FStrEq( kv->szKeyName, "usetarget" )) { m_useTarget = ALLOC_STRING( kv->szValue ); kv->fHandled = TRUE; }
+		else CNightfireEnemy::KeyValue( kv );
+	}
+	void EXPORT NPCUse( CBaseEntity *activator, CBaseEntity *caller, USE_TYPE type, float value )
+	{
+		if( !IsAlive() || m_MonsterState == MONSTERSTATE_SCRIPT || gpGlobals->time < m_nextUse || !activator || !activator->IsPlayer() ) return;
+		m_nextUse = gpGlobals->time + 1;
+		if( m_useTarget ) FireTargets( STRING( m_useTarget ), activator, caller, type, value );
+	}
+	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
+	string_t m_useTarget; float m_nextUse;
+};
+TYPEDESCRIPTION CNFPhotoNPC::m_SaveData[] = { DEFINE_FIELD( CNFPhotoNPC, m_useTarget, FIELD_STRING ), DEFINE_FIELD( CNFPhotoNPC, m_nextUse, FIELD_TIME ) };
+IMPLEMENT_SAVERESTORE( CNFPhotoNPC, CNightfireEnemy )
+LINK_ENTITY_TO_CLASS( npc_aigeneric, CNFPhotoNPC )
 
 void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 {
@@ -344,6 +383,16 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	else if( FStrEq( pkvd->szKeyName, "deathtarget" ))
 	{
 		m_iszDeathTarget = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "cameratarget" ))
+	{
+		m_iszCameraTarget = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "deathcam" ))
+	{
+		m_iszDeathCamera = ALLOC_STRING( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
 	else if( FStrEq( pkvd->szKeyName, "char_name" ))
@@ -448,11 +497,15 @@ void CNightfireEnemy::ReportCharacter( void )
 		m_dwExcludeAIEvents, STRING( m_iszTriggerTarget ), m_iTriggerCondition,
 		STRING( m_iszDeathTarget ), m_iWeapon, m_iGunIndex,
 		m_hEnemy ? ((CBaseEntity *)m_hEnemy)->entindex() : 0 );
+	ALERT( at_console, "nf_debug: character %s deathcam %s customid %d event %d\n",
+		STRING( pev->targetname ), STRING( m_iszDeathCamera ), m_iCoverID,
+		m_hAIEvent ? m_hAIEvent->entindex() : 0 );
+	ALERT( at_console, "nf_debug: character %s blind remaining %.2f\n", STRING( pev->targetname ), Q_max( 0.0f, m_flBlindUntil - gpGlobals->time ));
 }
 
 BOOL NF_EnemyChangeCharacter( CBaseEntity *entity, const nf_character_change_t &change )
 {
-	if( !entity || !FClassnameIs( entity->pev, "enemy_generic" )) return FALSE;
+	if( !entity || !(FClassnameIs( entity->pev, "enemy_generic" ) || FClassnameIs( entity->pev, "npc_aigeneric" ))) return FALSE;
 	((CNightfireEnemy *)entity)->ChangeCharacter( change );
 	return TRUE;
 }
@@ -682,7 +735,7 @@ void CNightfireEnemy::SetYawSpeed( void )
 
 BOOL CNightfireEnemy::CheckRangeAttack1( float flDot, float flDist )
 {
-	if( !Weapon())
+	if( !Weapon() || m_flBlindUntil > gpGlobals->time || ( m_hEnemy && NF_SmokeOccludes( GetGunPosition(), m_hEnemy->BodyTarget( GetGunPosition() ))))
 		return FALSE;
 	return CHGrunt::CheckRangeAttack1( flDot, flDist );
 }
@@ -694,8 +747,30 @@ BOOL CNightfireEnemy::CheckRangeAttack1( float flDot, float flDist )
 #define NF_ACT_FLINCH_LEFTLEG	76
 #define NF_ACT_FLINCH_RIGHTLEG	77
 
+void CNightfireEnemy::PhotoPose( BOOL enabled )
+{
+	if( m_fPhotoPose == enabled ) return;
+	m_fPhotoPose = enabled;
+	if( IsAlive() && m_MonsterState != MONSTERSTATE_SCRIPT && m_MonsterState != MONSTERSTATE_COMBAT ) SetActivity( ACT_IDLE );
+}
+
+string_t NF_PhotoCharacterTarget( CBaseEntity *entity )
+{
+	if( !entity || !(FClassnameIs( entity->pev, "enemy_generic" ) || FClassnameIs( entity->pev, "npc_aigeneric" ))) return 0;
+	return ((CNightfireEnemy *)entity)->PhotoTarget();
+}
+void NF_PhotoCharacterPose( CBaseEntity *entity, BOOL enabled )
+{
+	if( entity && (FClassnameIs( entity->pev, "enemy_generic" ) || FClassnameIs( entity->pev, "npc_aigeneric" ))) ((CNightfireEnemy *)entity)->PhotoPose( enabled );
+}
+
 void CNightfireEnemy::SetActivity( Activity NewActivity )
 {
+	if( NewActivity == ACT_IDLE && m_fPhotoPose && IsAlive() && m_MonsterState != MONSTERSTATE_SCRIPT && m_MonsterState != MONSTERSTATE_COMBAT )
+	{
+		int pose = LookupSequence( UTIL_VarArgs( "strike_a_pose%d", RANDOM_LONG( 1, 4 )));
+		if( pose >= 0 ) { m_Activity = NewActivity; pev->sequence = pose; pev->frame = 0; ResetSequenceInfo(); SetYawSpeed(); return; }
+	}
 	const nf_enemy_weapon_t *w = Weapon();
 	int iSequence;
 
@@ -797,7 +872,7 @@ void CNightfireEnemy::SetActivity( Activity NewActivity )
 void CNightfireEnemy::NFShoot( void )
 {
 	const nf_enemy_weapon_t *w = Weapon();
-	if( !w || m_hEnemy == 0 )
+	if( !w || m_hEnemy == 0 || m_flBlindUntil > gpGlobals->time || NF_SmokeOccludes( GetGunPosition(), m_hEnemy->BodyTarget( GetGunPosition() )))
 		return;
 
 	Vector vecShootOrigin = GetGunPosition();
@@ -834,6 +909,7 @@ void CNightfireEnemy::NFShoot( void )
 
 void CNightfireEnemy::HandleAnimEvent( MonsterEvent_t *pEvent )
 {
+	if( m_flBlindUntil > gpGlobals->time && ( pEvent->event == HGRUNT_AE_KICK || pEvent->event == HGRUNT_AE_GREN_TOSS || pEvent->event == HGRUNT_AE_GREN_LAUNCH )) return;
 	switch( pEvent->event )
 	{
 	case HGRUNT_AE_BURST1:
@@ -1015,6 +1091,19 @@ void CNightfireEnemy::TraceAttack( entvars_t *pevAttacker, float flDamage, Vecto
 
 void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 {
+	BOOL deathCamera = FALSE;
+	if( !HasMemory( bits_MEMORY_KILLED ))
+	{
+		if( !FStringNull( m_iszDeathCamera ))
+			deathCamera = m_iCoverID != NF_COVER_NONE || ( AIEvent() && AIEvent()->m_iEventType == NF_AIEVENT_DEATH );
+		else if( ( m_iNFSpawnflags & 0x40000 ) && !FStringNull( pev->netname ))
+		{
+			deathCamera = TRUE;
+			CBaseEntity *member = NULL;
+			while(( member = UTIL_FindEntityByString( member, "netname", STRING( pev->netname ))) != NULL )
+				if( member != this && ( member->pev->flags & FL_MONSTER ) && member->IsAlive() ) { deathCamera = FALSE; break; }
+		}
+	}
 	TaserRelease( m_hTaserWeapon );
 	// [assumed] an event not reached yet is free again (retail releases
 	// only events whose sequence is done, in HandleCustomActivity)
@@ -1031,6 +1120,7 @@ void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 		FireTargets( STRING( m_iszDeathTarget ), CBaseEntity::Instance( pevAttacker ), this, USE_TOGGLE, 0 );
 
 	CHGrunt::Killed( pevAttacker, iGib );
+	if( deathCamera ) NF_DeathCameraStart( this, pevAttacker, STRING( m_iszDeathCamera ));
 }
 
 //=========================================================
@@ -1153,6 +1243,22 @@ Schedule_t slNFTaser[] =
 	{ tlNFTaser, ARRAYSIZE( tlNFTaser ), 0, 0, "NFTaser" },
 };
 
+Task_t tlNFBlind[] = { { TASK_STOP_MOVING, 0 }, { TASK_NF_BLIND, 0 } };
+Schedule_t slNFBlind[] = { { tlNFBlind, ARRAYSIZE( tlNFBlind ), 0, 0, "NFBlind" } };
+
+void CNightfireEnemy::Blind( float duration )
+{
+	if( !IsAlive() || duration <= 0 || m_MonsterState == MONSTERSTATE_SCRIPT ) return;
+	m_flBlindUntil = Q_max( m_flBlindUntil, gpGlobals->time + duration );
+	ReleaseAIEvent( FALSE );
+	if( !m_hTaserWeapon ) ChangeSchedule( slNFBlind );
+	if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: enemy %s blinded %.2f seconds\n", STRING( pev->targetname ), duration );
+}
+void NF_BlindEnemy( CBaseEntity *entity, float duration )
+{
+	if( entity && FClassnameIs( entity->pev, "enemy_generic" )) ((CNightfireEnemy *)entity)->Blind( duration );
+}
+
 void CNightfireEnemy::UpdateOnRemove( void )
 {
 	TaserRelease( m_hTaserWeapon );
@@ -1221,6 +1327,7 @@ DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 	slNFWallAttack,
 	slNFDuctAttack,
 	slNFTaser,
+	slNFBlind,
 };
 
 IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
@@ -1601,6 +1708,7 @@ BOOL NF_EnemyActivateAIEvent( CBaseEntity *pEntity, CAIEvent *pEvent, CBaseEntit
 
 Schedule_t *CNightfireEnemy::GetSchedule( void )
 {
+	if( IsAlive() && !m_hTaserWeapon && m_flBlindUntil > gpGlobals->time ) return slNFBlind;
 	if( IsAlive() && m_hTaserWeapon != 0 )
 		return slNFTaser;
 	if( IsAlive() && InCover())
@@ -1657,6 +1765,7 @@ Schedule_t *CNightfireEnemy::GetSchedule( void )
 
 Schedule_t *CNightfireEnemy::GetScheduleOfType( int Type )
 {
+	if( IsAlive() && !m_hTaserWeapon && m_flBlindUntil > gpGlobals->time ) return slNFBlind;
 	if( IsAlive() && m_hTaserWeapon != 0 )
 		return slNFTaser;
 	if( Type == SCHED_NF_PATROL )
@@ -1692,6 +1801,13 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 {
 	switch( pTask->iTask )
 	{
+	case TASK_NF_BLIND:
+	{
+		int sequence = LookupSequence( "blinded" );
+		if( sequence >= 0 ) { pev->sequence = sequence; pev->frame = 0; ResetSequenceInfo(); }
+		else SetActivity( ACT_BIG_FLINCH );
+		break;
+	}
 	case TASK_NF_TASER:
 		m_IdealActivity = ACT_BIG_FLINCH;
 		SetActivity( ACT_BIG_FLINCH );
@@ -1809,6 +1925,15 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 {
 	switch( pTask->iTask )
 	{
+	case TASK_NF_BLIND:
+		pev->velocity = g_vecZero;
+		if( gpGlobals->time >= m_flBlindUntil )
+		{
+			TaskComplete();
+			if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: enemy %s blind recovered\n", STRING( pev->targetname ));
+		}
+		else if( m_fSequenceFinished ) { pev->frame = 0; ResetSequenceInfo(); }
+		break;
 	case TASK_NF_TASER:
 		if( m_hTaserWeapon == 0 )
 		{

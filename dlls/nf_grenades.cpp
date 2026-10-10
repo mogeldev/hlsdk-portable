@@ -25,6 +25,7 @@ the projectiles only into the server.
 #include "shake.h"
 #include "nf_weapons.h"
 #include "nf_debug.h"
+#include "nf_explosives.h"
 
 enum nf_grenade_e
 {
@@ -66,12 +67,30 @@ const nf_grenade_info_t g_nfFlashGrenade =
 	TRUE
 };
 
+const nf_grenade_info_t g_nfSmokeGrenade =
+{
+	NF_WEAPON_SMOKEGRENADE, "weapon_smokegrenade", "ammo_smokegrenade",
+	"models/v_smoke_grenade.mdl", "models/p_smoke_grenade.mdl",
+	"models/w_smoke_grenade.mdl", "models/w_ammo_smoke_grenade.mdl",
+	"smokegren", 2, 3.75f, 100.0f, 2.0f, 0.0f, 10.0f, 2
+};
+LINK_ENTITY_TO_CLASS( weapon_smokegrenade, CNightfireSmokeGrenade )
+LINK_ENTITY_TO_CLASS( ammo_smokegrenade, CNightfireSmokeGrenade )
+
 LINK_ENTITY_TO_CLASS( weapon_fraggrenade, CNightfireFragGrenade )
 LINK_ENTITY_TO_CLASS( ammo_fraggrenade, CNightfireFragGrenade )
 LINK_ENTITY_TO_CLASS( weapon_flashgrenade, CNightfireFlashGrenade )
 LINK_ENTITY_TO_CLASS( ammo_flashgrenade, CNightfireFlashGrenade )
 
 #if !CLIENT_DLL
+TYPEDESCRIPTION CNightfireHandGrenade::m_SaveData[] =
+{
+	DEFINE_FIELD( CNightfireHandGrenade, m_flStartThrow, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireHandGrenade, m_flReleaseThrow, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireHandGrenade, m_fInAttack, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireHandGrenade, m_fireState, FIELD_INTEGER ),
+};
+IMPLEMENT_SAVERESTORE( CNightfireHandGrenade, CBasePlayerWeapon )
 //=========================================================
 // projectile
 //=========================================================
@@ -82,15 +101,39 @@ public:
 	void Precache( void );
 	void BounceSound( void );
 	void Explode( TraceResult *pTrace, int bitsDamageType );
+	int Save( CSave &save ); int Restore( CRestore &restore );
+	static TYPEDESCRIPTION m_SaveData[];
+	BOOL m_fSmokeActive;
 
 	static CNightfireGrenade *Shoot( const nf_grenade_info_t *info, entvars_t *pevOwner, Vector vecStart, Vector vecVelocity, float time );
 
 private:
 	BOOL IsFlash( void ) { return FClassnameIs( pev, "flash_grenade" ); }
+	BOOL IsSmoke( void ) { return FClassnameIs( pev, "smoke_grenade" ); }
+public:
+	void EXPORT SmokeThink( void );
 };
 
 LINK_ENTITY_TO_CLASS( frag_grenade, CNightfireGrenade )
 LINK_ENTITY_TO_CLASS( flash_grenade, CNightfireGrenade )
+LINK_ENTITY_TO_CLASS( smoke_grenade, CNightfireGrenade )
+
+TYPEDESCRIPTION CNightfireGrenade::m_SaveData[] =
+{
+	DEFINE_FIELD( CNightfireGrenade, m_fSmokeActive, FIELD_BOOLEAN ),
+};
+int CNightfireGrenade::Save( CSave &save )
+{
+	if( !CGrenade::Save( save )) return 0;
+	return save.WriteFields( "CNightfireGrenade", this, m_SaveData, ARRAYSIZE( m_SaveData ));
+}
+int CNightfireGrenade::Restore( CRestore &restore )
+{
+	if( !CGrenade::Restore( restore ) || !restore.ReadFields( "CNightfireGrenade", this, m_SaveData, ARRAYSIZE( m_SaveData ))) return 0;
+	pev->iuser1 = m_fSmokeActive;
+	if( m_fSmokeActive ) { SetThink( &CNightfireGrenade::SmokeThink ); pev->nextthink = gpGlobals->time + 0.1f; }
+	return 1;
+}
 
 void CNightfireGrenade::Precache( void )
 {
@@ -100,6 +143,10 @@ void CNightfireGrenade::Precache( void )
 	PRECACHE_SOUND( "common/grenade_bounce_2.wav" );
 	PRECACHE_SOUND( "common/grenade_bounce_3.wav" );
 	PRECACHE_SOUND( "weapons/flashgr.wav" );
+	PRECACHE_SOUND( "weapons/smokegr.wav" );
+	PRECACHE_SOUND( "weapons/grenade_explode.wav" );
+	PRECACHE_MODEL( "models/w_smoke_grenade.mdl" );
+	PRECACHE_MODEL( "models/w_grenade_projectile.mdl" );
 }
 
 // retail 0x4206ef90 / 0x4206ec40; the classname is set before
@@ -108,7 +155,7 @@ void CNightfireGrenade::Spawn( void )
 	Precache();
 	pev->movetype = MOVETYPE_BOUNCE;
 	pev->solid = SOLID_BBOX;
-	SET_MODEL( ENT( pev ), IsFlash() ? "models/w_flash_grenade.mdl" : "models/w_frag_grenade.mdl" );
+	SET_MODEL( ENT( pev ), IsSmoke() ? "models/w_smoke_grenade.mdl" : IsFlash() ? "models/w_flash_grenade.mdl" : "models/w_frag_grenade.mdl" );
 	UTIL_SetSize( pev, g_vecZero, g_vecZero );
 	m_fRegisteredSound = FALSE;
 }
@@ -118,7 +165,7 @@ void CNightfireGrenade::Spawn( void )
 CNightfireGrenade *CNightfireGrenade::Shoot( const nf_grenade_info_t *info, entvars_t *pevOwner, Vector vecStart, Vector vecVelocity, float time )
 {
 	CNightfireGrenade *pGrenade = GetClassPtr( (CNightfireGrenade *)NULL );
-	pGrenade->pev->classname = MAKE_STRING( info->flash ? "flash_grenade" : "frag_grenade" );
+	pGrenade->pev->classname = MAKE_STRING( info->flash == 2 ? "smoke_grenade" : info->flash ? "flash_grenade" : "frag_grenade" );
 	pGrenade->Spawn();
 	UTIL_SetOrigin( pGrenade->pev, vecStart );
 	pGrenade->pev->velocity = vecVelocity;
@@ -195,26 +242,39 @@ static void NF_RadiusFlash( Vector vecSrc, entvars_t *pevInflictor, float flAmou
 			if( bFacing )
 				UTIL_ScreenFade( pEntity, Vector( 255, 255, 255 ), flAdj * 3.0f, flAdj / 1.5f, 255, FFADE_IN );
 		}
-		// retail monsters: blinded until now + amount * 3 (facing) or * 1.75
-		// (+0x384) [not yet: no blinded state in the enemy AI]
+		else
+			NF_BlindEnemy( pEntity, flAdj * ( bFacing ? 3.0f : 1.75f ));
 
 		if( NF_DEBUG( NF_DBG_WEAPONS ))
 			ALERT( at_console, "nf_debug: flash hits %s amount %.1f facing %d%s\n", STRING( pEntity->pev->classname ),
-				flAdj, bFacing, pEntity->IsPlayer() ? ( bFacing ? " -> screen fade" : "" ) : " (monster: not blinded yet)" );
+				flAdj, bFacing, pEntity->IsPlayer() ? ( bFacing ? " -> screen fade" : "" ) : " -> blinded" );
 	}
 }
 
-// frag: the Half-Life explosion (retail plays events/explosion.sc and
-// weapons/grenade_explode.wav instead [not yet]); flash: retail 0x4206ed50
+// Native explosion temporary entities replace retail custom particle events.
+// Flash: retail 0x4206ed50; smoke: a saved, bounded emitting cloud.
 void CNightfireGrenade::Explode( TraceResult *pTrace, int bitsDamageType )
 {
 	if( NF_DEBUG( NF_DBG_WEAPONS ))
 		ALERT( at_console, "nf_debug: %s explodes at %.0f %.0f %.0f damage %.0f\n", STRING( pev->classname ),
 			pev->origin.x, pev->origin.y, pev->origin.z, pev->dmg );
 
+	if( IsSmoke() )
+	{
+		pev->solid = SOLID_NOT;
+		pev->takedamage = DAMAGE_NO;
+		pev->velocity = g_vecZero;
+		pev->dmgtime = gpGlobals->time + 10;
+		pev->iuser1 = 1;
+		m_fSmokeActive = TRUE;
+		EMIT_SOUND( edict(), CHAN_BODY, "weapons/smokegr.wav", 1, ATTN_NORM );
+		SetThink( &CNightfireGrenade::SmokeThink );
+		pev->nextthink = gpGlobals->time + 0.1f;
+		return;
+	}
 	if( !IsFlash())
 	{
-		CGrenade::Explode( pTrace, bitsDamageType );
+		NF_Explode( this, pTrace, bitsDamageType );
 		return;
 	}
 
@@ -243,6 +303,53 @@ void CNightfireGrenade::Explode( TraceResult *pTrace, int bitsDamageType )
 		for( int i = 0; i < sparkCount; i++ )
 			Create( "spark_shower", pev->origin, pTrace->vecPlaneNormal, NULL );
 	}
+}
+CGrenade *NF_LaunchGrenade( entvars_t *owner, Vector origin, Vector velocity, BOOL timed )
+{
+	CNightfireGrenade *grenade = CNightfireGrenade::Shoot( &g_nfFragGrenade, owner, origin, velocity, timed ? 4.0f : 10.0f );
+	if( !grenade ) return NULL;
+	SET_MODEL( grenade->edict(), "models/w_grenade_projectile.mdl" );
+	grenade->pev->sequence = 0;
+	if( !timed )
+	{
+		grenade->SetTouch( &CGrenade::ExplodeTouch );
+		grenade->SetThink( &CGrenade::DangerSoundThink );
+	}
+	return grenade;
+}
+
+void CNightfireGrenade::SmokeThink( void )
+{
+	if( gpGlobals->time >= pev->dmgtime )
+	{
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: smoke cloud expired\n" );
+		UTIL_Remove( this ); return;
+	}
+	for( int i = 0; i < 5; ++i )
+	{
+		Vector origin = pev->origin + Vector( RANDOM_FLOAT( -96, 96 ), RANDOM_FLOAT( -96, 96 ), RANDOM_FLOAT( 0, 96 ));
+		MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, origin );
+			WRITE_BYTE( TE_SMOKE ); WRITE_COORD( origin.x ); WRITE_COORD( origin.y ); WRITE_COORD( origin.z );
+			WRITE_SHORT( g_sModelIndexSmoke ); WRITE_BYTE( 40 ); WRITE_BYTE( 8 );
+		MESSAGE_END();
+	}
+	pev->nextthink = gpGlobals->time + 0.5f;
+}
+
+BOOL NF_SmokeOccludes( Vector start, Vector end )
+{
+	CBaseEntity *cloud = NULL;
+	Vector segment = end - start;
+	float length2 = DotProduct( segment, segment );
+	if( length2 <= 0 ) return FALSE;
+	while(( cloud = UTIL_FindEntityByClassname( cloud, "smoke_grenade" )) != NULL )
+	{
+		if( !cloud->pev->iuser1 || cloud->pev->dmgtime <= gpGlobals->time ) continue;
+		Vector center = cloud->pev->origin + Vector( 0, 0, 48 );
+		float fraction = Q_max( 0.0f, Q_min( 1.0f, DotProduct( center - start, segment ) / length2 ));
+		if(( start + segment * fraction - center ).Length() < 128 ) return TRUE;
+	}
+	return FALSE;
 }
 #endif // !CLIENT_DLL
 
@@ -279,7 +386,7 @@ void CNightfireHandGrenade::Precache( void )
 	PRECACHE_MODEL( Info()->wmodel );
 	PRECACHE_MODEL( Info()->ammomodel );
 #if !CLIENT_DLL
-	UTIL_PrecacheOther( Info()->flash ? "flash_grenade" : "frag_grenade" );
+	UTIL_PrecacheOther( Info()->flash == 2 ? "smoke_grenade" : Info()->flash ? "flash_grenade" : "frag_grenade" );
 #endif
 }
 

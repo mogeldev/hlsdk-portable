@@ -1,13 +1,17 @@
 /*
 nf_items.cpp - James Bond 007: Nightfire (PC) map props for the Xash3D port
 
-There is no Nightfire FGD; the key meanings below are inferred from the key
-values in the retail maps (m5_power01, m7_island03) and are assumptions.
+There is no Nightfire FGD; prop keys initially came from retail maps.
+Player-use behavior below is based on CGenericItem::Use (0x420699D0);
+origin-based visibility, conditional caps and direct-use once are port decisions.
 
 item_generic   - a studio-model prop (pipes, spotlights, servers, monitors):
                  "model", "body", "skin", "sequencename" (always "idle1" on
                  m5/m7), render keys; "usebody" = body to switch to when
-                 triggered (otherwise triggering toggles visibility);
+                 triggered; player use (spawnflag 0x80) also supports
+                 "usesequencename", "usesound", "useskin", "master" and
+                 targets. Spawnflag 0x20 makes player use once-only. Scripted
+                 use retains the existing body/visibility behavior;
                  "minbbox"/"maxbbox" = collision box ("0 0 0" = not solid).
                  "fixedlight" (RGB) and "Effects" 256 (EF_FIXEDLIGHT) are plain
                  entvars: the engine uses them as the model light floor.
@@ -34,6 +38,7 @@ item_armor_plate / item_armor_vest - health pickups (retail CArmorPlate /
 #include "items.h"
 #include "gamerules.h"
 #include "nf_debug.h"
+#include "nf_items.h"
 
 static Vector NF_ParseVector( const char *s )
 {
@@ -47,6 +52,9 @@ static BOOL NF_IsNone( string_t s )
 	return FStringNull( s ) || !STRING( s )[0] || FStrEq( STRING( s ), "none" );
 }
 
+#define SF_NFITEM_USE_ONCE 0x20
+#define SF_NFITEM_PLAYER_USE 0x80
+
 class CNightfireItem : public CBaseAnimating
 {
 public:
@@ -54,7 +62,14 @@ public:
 	void Precache( void );
 	void KeyValue( KeyValueData *pkvd );
 	void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
-	int ObjectCaps( void ) { return CBaseAnimating::ObjectCaps() & ~FCAP_ACROSS_TRANSITION; }
+	int ObjectCaps( void )
+	{
+		int caps = CBaseAnimating::ObjectCaps() & ~FCAP_ACROSS_TRANSITION;
+		return FBitSet( pev->spawnflags, SF_NFITEM_PLAYER_USE ) ? caps | FCAP_IMPULSE_USE : caps;
+	}
+	void EXPORT UseSequenceThink( void );
+	void EXPORT UseAnimThink( void );
+	void ReportUse( void );
 
 	virtual int Save( CSave &save );
 	virtual int Restore( CRestore &restore );
@@ -62,9 +77,18 @@ public:
 
 protected:
 	void PlaySequence( string_t name );
+	void ApplyPlayerUse( void );
 
 	string_t m_iszSequence;
 	int m_iUseBody;
+	string_t m_iszUseSequence;
+	string_t m_iszUseSound;
+	string_t m_iszUseMaster;
+	int m_iUseSkin;
+	BOOL m_fPlayerUsed;
+	BOOL m_fPlayerTargetsFired;
+	BOOL m_fUsePending;
+	BOOL m_fBroken;
 	Vector m_vecBBoxMin;
 	Vector m_vecBBoxMax;
 };
@@ -73,6 +97,14 @@ TYPEDESCRIPTION CNightfireItem::m_SaveData[] =
 {
 	DEFINE_FIELD( CNightfireItem, m_iszSequence, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireItem, m_iUseBody, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireItem, m_iszUseSequence, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireItem, m_iszUseSound, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireItem, m_iszUseMaster, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireItem, m_iUseSkin, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireItem, m_fPlayerUsed, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireItem, m_fPlayerTargetsFired, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireItem, m_fUsePending, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireItem, m_fBroken, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireItem, m_vecBBoxMin, FIELD_VECTOR ),
 	DEFINE_FIELD( CNightfireItem, m_vecBBoxMax, FIELD_VECTOR ),
 };
@@ -93,6 +125,26 @@ void CNightfireItem::KeyValue( KeyValueData *pkvd )
 		m_iUseBody = atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
+	else if( FStrEq( pkvd->szKeyName, "usesequencename" ))
+	{
+		m_iszUseSequence = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "usesound" ))
+	{
+		m_iszUseSound = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "useskin" ))
+	{
+		m_iUseSkin = atoi( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "master" ))
+	{
+		m_iszUseMaster = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
 	else if( FStrEq( pkvd->szKeyName, "minbbox" ))
 	{
 		m_vecBBoxMin = NF_ParseVector( pkvd->szValue );
@@ -110,6 +162,8 @@ void CNightfireItem::KeyValue( KeyValueData *pkvd )
 void CNightfireItem::Precache( void )
 {
 	PRECACHE_MODEL( STRING( pev->model ));
+	if( !NF_IsNone( m_iszUseSound ))
+		PRECACHE_SOUND( STRING( m_iszUseSound ));
 }
 
 void CNightfireItem::PlaySequence( string_t name )
@@ -156,12 +210,175 @@ void CNightfireItem::Spawn( void )
 
 void CNightfireItem::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 {
-	if( m_iUseBody > 0 )
-		pev->body = m_iUseBody;
-	else if( FBitSet( pev->effects, EF_NODRAW ))
-		ClearBits( pev->effects, EF_NODRAW );
+	if( m_fBroken || m_fUsePending )
+	{
+		if( NF_DEBUG( NF_DBG_ITEMS ))
+			ALERT( at_console, "nf_debug: item %s reject %s\n", STRING( pev->model ), m_fBroken ? "broken" : "pending" );
+		return;
+	}
+
+	// Retail tests the caller; normal PlayerUse passes the player in both slots.
+	CBaseEntity *pUser = pCaller ? pCaller : pActivator;
+	if( !pUser || !pUser->IsPlayer() )
+	{
+		if( m_iUseBody > 0 )
+			pev->body = m_iUseBody;
+		else if( FBitSet( pev->effects, EF_NODRAW ))
+			ClearBits( pev->effects, EF_NODRAW );
+		else
+			SetBits( pev->effects, EF_NODRAW );
+		return;
+	}
+
+	if( !FBitSet( pev->spawnflags, SF_NFITEM_PLAYER_USE ) ||
+		( FBitSet( pev->spawnflags, SF_NFITEM_USE_ONCE ) && m_fPlayerUsed ) ||
+		!UTIL_IsMasterTriggered( m_iszUseMaster, pActivator ))
+	{
+		if( NF_DEBUG( NF_DBG_ITEMS ))
+			ALERT( at_console, "nf_debug: item %s reject gate flags %d used %d master %s\n",
+				STRING( pev->model ), pev->spawnflags, m_fPlayerUsed, STRING( m_iszUseMaster ));
+		return;
+	}
+
+	Vector usePoint;
+	NF_ItemUsePoint( this, pUser->pev->origin, usePoint );
+	if(( usePoint - pUser->pev->origin ).Length() > 64.0f )
+	{
+		if( NF_DEBUG( NF_DBG_ITEMS ))
+			ALERT( at_console, "nf_debug: item %s reject range\n", STRING( pev->model ));
+		return;
+	}
+	NF_ItemUsePoint( this, pUser->EyePosition(), usePoint );
+	TraceResult tr;
+	UTIL_TraceLine( pUser->EyePosition(), usePoint, dont_ignore_monsters,
+		dont_ignore_glass, pUser->edict(), &tr );
+	if( tr.fStartSolid || tr.fAllSolid || ( tr.flFraction < 1.0f && tr.pHit != edict() ))
+	{
+		if( NF_DEBUG( NF_DBG_ITEMS ))
+			ALERT( at_console, "nf_debug: item %s reject occluded fraction %.3f hit %s eye %.1f %.1f %.1f point %.1f %.1f %.1f\n",
+				STRING( pev->model ), tr.flFraction, tr.pHit ? STRING( tr.pHit->v.classname ) : "none",
+				pUser->EyePosition().x, pUser->EyePosition().y, pUser->EyePosition().z,
+				usePoint.x, usePoint.y, usePoint.z );
+		return;
+	}
+
+	// [assumed] Also latch direct use; retail only latches the sequence branch.
+	m_fPlayerUsed = TRUE;
+	if( !NF_IsNone( m_iszUseSequence ))
+	{
+		if( !NF_IsNone( m_iszUseSound ))
+			EMIT_SOUND( edict(), CHAN_BODY, STRING( m_iszUseSound ), 1.0f, ATTN_NONE );
+		m_fUsePending = TRUE;
+		SetThink( &CNightfireItem::UseSequenceThink );
+		pev->nextthink = gpGlobals->time + 0.1f;
+	}
 	else
-		SetBits( pev->effects, EF_NODRAW );
+		ApplyPlayerUse();
+}
+
+void CNightfireItem::ApplyPlayerUse( void )
+{
+	if( m_iUseBody > 0 )
+		SetBodygroup( 0, m_iUseBody );
+	if( m_iUseSkin > 0 )
+		pev->skin = m_iUseSkin;
+
+	CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
+	m_fPlayerTargetsFired = TRUE;
+	if( NF_DEBUG( NF_DBG_ITEMS ))
+		ALERT( at_console, "nf_debug: item %s player targets %s body %d skin %d sequence %d\n",
+			STRING( pev->model ), STRING( pev->target ), pev->body, pev->skin, pev->sequence );
+	SUB_UseTargets( pPlayer ? pPlayer : this, USE_TOGGLE, 0 );
+}
+
+void CNightfireItem::UseSequenceThink( void )
+{
+	m_fUsePending = FALSE;
+	if( m_fBroken )
+	{
+		SetThink( NULL );
+		pev->nextthink = 0;
+		return;
+	}
+
+	PlaySequence( m_iszUseSequence );
+	SetThink( &CNightfireItem::UseAnimThink );
+	pev->nextthink = gpGlobals->time + 0.1f;
+	// Retail 0x42069110 fires targets at sequence start, not at completion.
+	ApplyPlayerUse();
+}
+
+void CNightfireItem::UseAnimThink( void )
+{
+	StudioFrameAdvance();
+	BOOL finished = m_fSequenceFinished;
+	DispatchAnimEvents();
+	// Event dispatch predicts one tick ahead; finish on the actual last frame.
+	if( finished && !m_fSequenceLoops )
+	{
+		pev->frame = 255.0f;
+		pev->framerate = 0;
+		SetThink( NULL );
+		pev->nextthink = 0;
+	}
+	else
+		pev->nextthink = gpGlobals->time + 0.1f;
+}
+
+void CNightfireItem::ReportUse( void )
+{
+	ALERT( at_console, "nf_debug: item %s model %s flags %d caps %d body %d skin %d used %d pending %d fired %d broken %d sequence %d frame %.1f master %s/%d target %s origin %.1f %.1f %.1f effects %d finished %d loops %d next %.2f\n",
+		STRING( pev->targetname ), STRING( pev->model ), pev->spawnflags, ObjectCaps(), pev->body, pev->skin,
+		m_fPlayerUsed, m_fUsePending, m_fPlayerTargetsFired, m_fBroken, pev->sequence, pev->frame,
+		STRING( m_iszUseMaster ), UTIL_IsMasterTriggered( m_iszUseMaster, UTIL_PlayerByIndex( 1 )),
+		STRING( pev->target ), pev->origin.x, pev->origin.y, pev->origin.z, pev->effects,
+		m_fSequenceFinished, m_fSequenceLoops, pev->nextthink > 0 ? pev->nextthink - gpGlobals->time : 0 );
+	CBaseEntity *player = UTIL_PlayerByIndex( 1 );
+	if( player )
+	{
+		TraceResult tr;
+		Vector usePoint;
+		if( !NF_ItemUsePoint( this, player->EyePosition(), usePoint )) usePoint = pev->origin;
+		UTIL_TraceLine( player->EyePosition(), usePoint, dont_ignore_monsters,
+			dont_ignore_glass, player->edict(), &tr );
+		ALERT( at_console, "nf_debug: item %s use trace %.3f start %d hit %s center %.1f %.1f %.1f eye %.1f %.1f %.1f\n",
+			STRING( pev->targetname ), tr.flFraction, tr.fStartSolid, tr.pHit ? STRING( tr.pHit->v.classname ) : "none",
+			Center().x, Center().y, Center().z, player->EyePosition().x, player->EyePosition().y, player->EyePosition().z );
+	}
+}
+
+BOOL NF_ItemUsePoint( CBaseEntity *entity, const Vector &source, Vector &point )
+{
+	if( !FBitSet( entity->pev->spawnflags, SF_NFITEM_PLAYER_USE ) ||
+		!( FClassnameIs( entity->pev, "item_generic" ) || FClassnameIs( entity->pev, "item_breakable" ) ||
+			FClassnameIs( entity->pev, "item_grappletarget" )))
+		return FALSE;
+	Vector mins = entity->pev->origin + entity->pev->mins;
+	Vector maxs = entity->pev->origin + entity->pev->maxs;
+	// Retain the authored interaction height when sequence bounds lie below it.
+	mins.z = min( mins.z, entity->pev->origin.z );
+	maxs.z = max( maxs.z, entity->pev->origin.z );
+	for( int i = 0; i < 3; i++ )
+		point[i] = max( mins[i], min( maxs[i], source[i] ));
+	return TRUE;
+}
+
+BOOL NF_ItemCommand( CBaseEntity *player, const char *command )
+{
+	if( !FStrEq( command, "nf_iteminfo" )) return FALSE;
+	if( NF_DEBUG( NF_DBG_ITEMS ))
+	{
+		const char *classes[] = { "item_generic", "item_breakable", "item_grappletarget" };
+		for( int i = 0; i < 3; i++ )
+		{
+			CBaseEntity *entity = NULL;
+			while(( entity = UTIL_FindEntityByClassname( entity, classes[i] )) != NULL )
+				if( CMD_ARGC() < 2 || FStrEq( STRING( entity->pev->targetname ), CMD_ARGV( 1 )) ||
+					FStrEq( STRING( entity->pev->model ), CMD_ARGV( 1 )))
+					((CNightfireItem *)entity)->ReportUse();
+		}
+	}
+	return TRUE;
 }
 
 // item_grappletarget: what the grapple (dlls/nf_grapple.cpp) can hook into.
@@ -331,7 +548,7 @@ int CNightfireBreakable::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAtta
 	if( pev->takedamage == DAMAGE_NO )
 		return 0;
 
-	if( !NF_IsNone( m_iszHitAnim ) && pev->health > flDamage )
+	if( !m_fUsePending && !NF_IsNone( m_iszHitAnim ) && pev->health > flDamage )
 	{
 		PlaySequence( m_iszHitAnim );
 		SetThink( &CNightfireBreakable::HitAnimThink );
@@ -349,6 +566,11 @@ void CNightfireBreakable::HitAnimThink( void )
 
 void CNightfireBreakable::Killed( entvars_t *pevAttacker, int iGib )
 {
+	if( m_fBroken )
+		return;
+	m_fBroken = TRUE;
+	m_fUsePending = FALSE;
+
 	Vector vecSpot = pev->origin + ( pev->mins + pev->maxs ) * 0.5f;
 
 	pev->takedamage = DAMAGE_NO;
@@ -379,7 +601,13 @@ void CNightfireBreakable::Killed( entvars_t *pevAttacker, int iGib )
 	if( m_iMaterial == 4 )
 		UTIL_Sparks( vecSpot );
 
-	SUB_UseTargets( CBaseEntity::Instance( pevAttacker ), USE_TOGGLE, 0 );
+	// [assumed] Deduplicate completed use, but let destruction fire a cancelled start.
+	if( !FBitSet( pev->spawnflags, SF_NFITEM_USE_ONCE ) || !m_fPlayerTargetsFired )
+	{
+		if( NF_DEBUG( NF_DBG_ITEMS ))
+			ALERT( at_console, "nf_debug: item %s destroyed targets %s\n", STRING( pev->model ), STRING( pev->target ));
+		SUB_UseTargets( CBaseEntity::Instance( pevAttacker ), USE_TOGGLE, 0 );
+	}
 
 	if( m_iDamagedBody > 0 )
 	{

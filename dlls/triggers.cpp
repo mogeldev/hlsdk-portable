@@ -28,6 +28,7 @@
 #include "trains.h"			// trigger_camera has train functionality
 #include "gamerules.h"
 #include "nf_debug.h"
+#include "nf_deathcamera.h"
 
 #define	SF_TRIGGER_PUSH_START_OFF	2//spawnflag that makes trigger_push spawn turned OFF
 #define SF_TRIGGER_HURT_TARGETONCE	1// Only fire hurt target once
@@ -1547,6 +1548,7 @@ void CChangeLevel::ChangeLevelNow( CBaseEntity *pActivator )
 	}
 	else if( !(pev->spawnflags & SF_CHANGELEVEL_LANDMARK) )
 		strcpy( st_szNextSpot, m_szLandmarkName );
+	NF_DeathCameraReset( (CBasePlayer *)pPlayer );
 	SET_VIEW(pPlayer->edict(), pPlayer->edict());
 	//ALERT( at_console, "Level touches %d levels\n", ChangeList( levels, 16 ) );
 	ALERT( at_console, "CHANGE LEVEL: %s %s\n", st_szNextMap, st_szNextSpot );

@@ -161,6 +161,7 @@ void CNightfireWatch::Holster( int skiplocal )
 
 void CNightfireWatch::UpdateOnRemove( void )
 {
+	if( m_pPlayer ) STOP_SOUND( m_pPlayer->edict(), CHAN_STATIC, WATCH_FIRE_SOUND );
 	if( m_pBeam )
 	{
 		UTIL_Remove( m_pBeam );

@@ -63,6 +63,7 @@ extern const nf_gun_info_t g_nfGunFrinesi;
 extern const nf_gun_info_t g_nfGunL96;
 extern const nf_gun_info_t g_nfGunL96Winter;
 extern const nf_gun_info_t g_nfGunMinigun;
+extern const nf_gun_info_t g_nfGunUP11;
 
 const nf_gun_info_t *NF_GunInfo( int id );
 
