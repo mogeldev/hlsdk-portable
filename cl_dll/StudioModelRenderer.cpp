@@ -638,6 +638,15 @@ void CStudioModelRenderer::StudioCalcRotations( float pos[][3], vec4_t *q, mstud
 
 	StudioCalcBoneAdj( dadt, adj, m_pCurrentEntity->curstate.controller, m_pCurrentEntity->latched.prevcontroller, m_pCurrentEntity->mouth.mouthopen );
 
+	// Nightfire traversal: motion flags 0x1000/0x2000/0x4000 mark root motion on
+	// X/Y/Z [assumed from the decoded root deltas]. The player movement already
+	// moves the entity, so strip the root's progress since frame 0 instead of
+	// drawing it a second time (it looked twice as fast and snapped back).
+	vec3_t nfRootBase;
+	int nfRootMotion = m_pCurrentEntity->player && m_pCurrentEntity->curstate.iuser4 ? ( pseqdesc->motiontype >> 12 ) & 7 : 0;
+	if( nfRootMotion )
+		StudioCalcBonePosition( 0, 0.0f, pbone + pseqdesc->motionbone, panim + pseqdesc->motionbone, adj, nfRootBase );
+
 	for( i = 0; i < m_pStudioHeader->numbones; i++, pbone++, panim++ )
 	{
 		StudioCalcBoneQuaterion( frame, s, pbone, panim, adj, q[i] );
@@ -645,6 +654,12 @@ void CStudioModelRenderer::StudioCalcRotations( float pos[][3], vec4_t *q, mstud
 		StudioCalcBonePosition( frame, s, pbone, panim, adj, pos[i] );
 		// if( 0 && i == 0 )
 		//	Con_DPrintf( "%d %d %d %d\n", m_pCurrentEntity->curstate.sequence, frame, j, k );
+	}
+
+	for( i = 0; i < 3; i++ )
+	{
+		if( nfRootMotion & ( 1 << i ))
+			pos[pseqdesc->motionbone][i] = nfRootBase[i];
 	}
 
 	if( pseqdesc->motiontype & STUDIO_X )
@@ -1386,7 +1401,10 @@ int CStudioModelRenderer::StudioDrawPlayer( int flags, entity_state_t *pplayer )
 	if( m_nPlayerIndex < 0 || m_nPlayerIndex >= gEngfuncs.GetMaxClients() )
 		return 0;
 
-	m_pRenderModel = IEngineStudio.SetupPlayerModel( m_nPlayerIndex );
+	if( m_pCurrentEntity->curstate.iuser4 )
+		m_pRenderModel = IEngineStudio.GetModelByIndex( m_pCurrentEntity->curstate.modelindex );
+	else
+		m_pRenderModel = IEngineStudio.SetupPlayerModel( m_nPlayerIndex );
 	if( m_pRenderModel == NULL )
 		return 0;
 

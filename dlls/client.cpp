@@ -41,6 +41,7 @@
 #include "pm_shared.h"
 #include "nf_character.h"
 #include "nf_searchlight.h"
+#include "nf_traversal.h"
 
 extern DLL_GLOBAL ULONG		g_ulModelIndexPlayer;
 extern DLL_GLOBAL BOOL		g_fGameOver;
@@ -102,6 +103,7 @@ GLOBALS ASSUMED SET:  g_fGameOver
 */
 void ClientDisconnect( edict_t *pEntity )
 {
+	if( pEntity->pvPrivateData ) NF_TraversalReset( (CBasePlayer *)CBaseEntity::Instance( pEntity ), FALSE );
 	if( g_fGameOver )
 		return;
 
@@ -480,7 +482,8 @@ void ClientCommand( edict_t *pEntity )
 	entvars_t *pev = &pEntity->v;
 
 	if( NF_CharacterCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
-		NF_SearchlightCommand( CBaseEntity::Instance( pEntity ), pcmd )) return;
+		NF_SearchlightCommand( CBaseEntity::Instance( pEntity ), pcmd ) ||
+		NF_TraversalCommand( CBaseEntity::Instance( pEntity ), pcmd )) return;
 
 	if( FStrEq( pcmd, "say" ) )
 	{
@@ -1271,6 +1274,16 @@ int AddToFullPack( struct entity_state_s *state, int e, edict_t *ent, edict_t *h
 	// engine's water renderer (retail engine.dll reads both from the client entity)
 	state->fuser1		= ent->v.fuser1;
 	state->iuser1		= ent->v.iuser1;
+	if( player )
+	{
+		state->iuser4 = ent->v.iuser4;
+		state->fuser4 = ent->v.fuser4;
+	}
+	if( FClassnameIs( ent, "func_handoverhand" ) || FClassnameIs( ent, "func_huggable" ))
+	{
+		memcpy( state->vuser1, ent->v.vuser1, sizeof( state->vuser1 ));
+		memcpy( state->vuser2, ent->v.vuser2, sizeof( state->vuser2 ));
+	}
 	if( FClassnameIs( ent, "enemy_searchlight" ))
 	{
 		state->iuser2 = ent->v.iuser2;
@@ -1769,6 +1782,8 @@ void UpdateClientData( const struct edict_s *ent, int sendweapons, struct client
 	cd->weaponanim		= pev->weaponanim;
 
 	cd->pushmsec		= pev->pushmsec;
+	cd->iuser4 = pevOrg ? 0 : pev->iuser4;
+	cd->fuser4 = pevOrg ? 0 : pev->fuser4;
 
 	// Spectator mode
 	if( pevOrg != NULL )

@@ -30,6 +30,7 @@
 #include "pm_shared.h"
 #include "pm_movevars.h"
 #include "pm_debug.h"
+#include "nf_traversal.h"
 
 #if CLIENT_DLL
 // Spectator Mode
@@ -2272,7 +2273,8 @@ physent_t *PM_Ladder( void )
 	{
 		pe = &pmove->moveents[i];
 
-		if( pe->model && (modtype_t)pmove->PM_GetModelType( pe->model ) == mod_brush && pe->skin == CONTENTS_LADDER )
+		if( pe->model && (modtype_t)pmove->PM_GetModelType( pe->model ) == mod_brush && pe->skin == CONTENTS_LADDER &&
+			pe->iuser1 != NF_TRAVERSAL_WALL && pe->iuser1 != NF_TRAVERSAL_CABLE && pe->iuser1 != NF_TRAVERSAL_DISABLED )
 		{
 
 			hull = (hull_t *)pmove->PM_HullForBsp( pe, test );
@@ -3003,6 +3005,194 @@ void PM_ReduceTimers( void )
 	}
 }
 
+static qboolean PM_TraversalContains( physent_t *brush )
+{
+	vec3_t offset, point;
+	hull_t *hull;
+	int x, y, z, savehull = pmove->usehull;
+	if( !brush->model || (modtype_t)pmove->PM_GetModelType( brush->model ) != mod_brush )
+		return false;
+	// Converted non-solid brushes may lack expanded clip hulls: sample the player box in the point hull.
+	pmove->usehull = 2;
+	hull = (hull_t *)pmove->PM_HullForBsp( brush, offset );
+	pmove->usehull = savehull;
+	for( x = 0; x < 3; x++ )
+	for( y = 0; y < 3; y++ )
+	for( z = 0; z < 3; z++ )
+	{
+		float *mins = pmove->player_mins[savehull], *maxs = pmove->player_maxs[savehull];
+		point[0] = pmove->origin[0] + ( x == 0 ? mins[0] : ( x == 1 ? 0 : maxs[0] )) - offset[0];
+		point[1] = pmove->origin[1] + ( y == 0 ? mins[1] : ( y == 1 ? 0 : maxs[1] )) - offset[1];
+		point[2] = pmove->origin[2] + ( z == 0 ? mins[2] : ( z == 1 ? 0 : maxs[2] )) - offset[2];
+		if( pmove->PM_HullPointContents( hull, hull->firstclipnode, point ) != CONTENTS_EMPTY )
+			return true;
+	}
+	return false;
+}
+
+static void PM_TraversalRelease( void )
+{
+	int phase = NF_TRAVERSAL_PHASE( pmove->iuser4 );
+	pmove->fuser4 = phase <= NF_TRAVERSAL_WALL_ACTIVE ? -NF_TRAVERSAL_WALL_COOLDOWN_MS : -NF_TRAVERSAL_CABLE_COOLDOWN_MS;
+	pmove->iuser4 = 0;
+	pmove->flFallVelocity = 0;
+	VectorClear( pmove->velocity );
+}
+
+static qboolean PM_TraversalCablePoint( physent_t *brush, vec3_t point, vec3_t direction )
+{
+	vec3_t relative;
+	float distance, length;
+	VectorSubtract( brush->vuser2, brush->vuser1, direction );
+	length = VectorNormalize( direction );
+	if( length < 1.0f ) return false;
+	VectorSubtract( pmove->origin, brush->vuser1, relative );
+	distance = DotProduct( relative, direction );
+	VectorMA( brush->vuser1, distance, direction, point );
+	point[2] = brush->vuser1[2] - 48.0f;
+	return true;
+}
+
+static qboolean PM_TraversalMove( void )
+{
+	physent_t *brush = NULL;
+	vec3_t point, direction, forward, right;
+	pmtrace_t trace;
+	int i, phase, state;
+	qboolean attached = false;
+	qboolean usePressed = ( pmove->cmd.buttons & IN_USE ) && !( pmove->oldbuttons & IN_USE );
+
+	if( !pmove->iuser4 && pmove->fuser4 < 0 )
+		pmove->fuser4 = min( 0, pmove->fuser4 + pmove->cmd.msec );
+	if( pmove->dead || pmove->spectator || pmove->iuser1 || pmove->movetype != MOVETYPE_WALK ||
+		( pmove->flags & FL_ONTRAIN ) || pmove->waterlevel >= 2 )
+	{
+		if( pmove->iuser4 ) PM_TraversalRelease();
+		return false;
+	}
+	for( i = 0; i < pmove->nummoveent; i++ )
+	{
+		physent_t *candidate = &pmove->moveents[i];
+		if( candidate->skin != CONTENTS_LADDER ||
+			( candidate->iuser1 != NF_TRAVERSAL_WALL && candidate->iuser1 != NF_TRAVERSAL_CABLE )) continue;
+		if( pmove->iuser4 && candidate->info != NF_TRAVERSAL_ENTITY( pmove->iuser4 )) continue;
+		if( !PM_TraversalContains( candidate )) continue;
+		if( !pmove->iuser4 )
+		{
+			if( pmove->fuser4 < 0 || ( pmove->flags & FL_DUCKING ) || pmove->bInDuck ) continue;
+			if( candidate->iuser1 == NF_TRAVERSAL_CABLE && !usePressed ) continue;
+			if( candidate->iuser1 == NF_TRAVERSAL_CABLE )
+			{
+				if( !PM_TraversalCablePoint( candidate, point, direction )) continue;
+				trace = pmove->PM_PlayerTrace( pmove->origin, point, PM_NORMAL, -1 );
+				if( trace.startsolid || trace.allsolid || trace.fraction != 1.0f ) continue;
+				VectorCopy( trace.endpos, pmove->origin );
+			}
+			phase = candidate->iuser1 == NF_TRAVERSAL_WALL ? NF_TRAVERSAL_WALL_MOUNT : NF_TRAVERSAL_CABLE_MOUNT;
+			pmove->iuser4 = NF_TRAVERSAL_STATE( candidate->info, phase );
+			pmove->fuser4 = candidate->iuser1 == NF_TRAVERSAL_WALL ? NF_TRAVERSAL_WALL_MOUNT_MS : NF_TRAVERSAL_CABLE_MOUNT_MS;
+			attached = true;
+		}
+		brush = candidate;
+		break;
+	}
+	if( !brush )
+	{
+		if( pmove->iuser4 ) PM_TraversalRelease();
+		return false;
+	}
+	phase = NF_TRAVERSAL_PHASE( pmove->iuser4 );
+	if( brush->iuser1 == NF_TRAVERSAL_CABLE && usePressed && !attached )
+	{
+		PM_TraversalRelease();
+		return false;
+	}
+	state = NF_TRAVERSAL_ENTITY( pmove->iuser4 );
+	if( pmove->fuser4 > 0 )
+	{
+		pmove->fuser4 = max( 0, pmove->fuser4 - pmove->cmd.msec );
+		if( pmove->fuser4 == 0 )
+		{
+			if( phase == NF_TRAVERSAL_WALL_MOUNT ) phase = NF_TRAVERSAL_WALL_ACTIVE;
+			else if( phase == NF_TRAVERSAL_CABLE_MOUNT || phase == NF_TRAVERSAL_CABLE_TURN_REVERSE ) phase = NF_TRAVERSAL_CABLE_FORWARD;
+			else if( phase == NF_TRAVERSAL_CABLE_TURN_FORWARD ) phase = NF_TRAVERSAL_CABLE_REVERSE;
+		}
+	}
+	{
+		float vertical = pmove->velocity[2];
+		VectorClear( pmove->velocity );
+		if( brush->iuser1 == NF_TRAVERSAL_WALL && !attached ) pmove->velocity[2] = vertical;
+	}
+	if( brush->iuser1 == NF_TRAVERSAL_WALL )
+	{
+		VectorCopy( brush->vuser2, pmove->angles );
+		AngleVectors( pmove->angles, forward, right, NULL );
+		if( phase == NF_TRAVERSAL_WALL_ACTIVE )
+		{
+			// Back to the wall, camera in front: retail wallhugright moves along the
+			// model's local +Y (its own left), which is screen right for that camera.
+			float speed = min( NF_TRAVERSAL_WALL_SPEED, pmove->maxspeed );
+			if( pmove->cmd.buttons & IN_MOVERIGHT ) VectorScale( right, -speed, pmove->velocity );
+			else if( pmove->cmd.buttons & IN_MOVELEFT ) VectorScale( right, speed, pmove->velocity );
+		}
+	}
+	else
+	{
+		if( !PM_TraversalCablePoint( brush, point, direction ))
+		{
+			PM_TraversalRelease();
+			return false;
+		}
+		// Correct drift through a hull trace, never through walls by an unchecked projection.
+		trace = pmove->PM_PlayerTrace( pmove->origin, point, PM_NORMAL, -1 );
+		if( trace.startsolid || trace.allsolid || trace.fraction != 1.0f )
+		{
+			PM_TraversalRelease();
+			return false;
+		}
+		VectorCopy( trace.endpos, pmove->origin );
+		pmove->angles[0] = pmove->angles[2] = 0;
+		pmove->angles[1] = atan2( direction[1], direction[0] ) * ( 180.0f / M_PI );
+		if( phase == NF_TRAVERSAL_CABLE_REVERSE || phase == NF_TRAVERSAL_CABLE_TURN_REVERSE ) pmove->angles[1] += 180;
+		if( phase == NF_TRAVERSAL_CABLE_FORWARD || phase == NF_TRAVERSAL_CABLE_REVERSE )
+		{
+			if( pmove->cmd.buttons & IN_FORWARD )
+			{
+				float speed = min( NF_TRAVERSAL_CABLE_SPEED, pmove->maxspeed );
+				if( phase == NF_TRAVERSAL_CABLE_REVERSE ) speed = -speed;
+				VectorScale( direction, speed, pmove->velocity );
+				pmove->velocity[2] = 0;
+			}
+			else if( ( pmove->cmd.buttons & IN_BACK ) && !( pmove->oldbuttons & IN_BACK ))
+			{
+				phase = phase == NF_TRAVERSAL_CABLE_FORWARD ? NF_TRAVERSAL_CABLE_TURN_FORWARD : NF_TRAVERSAL_CABLE_TURN_REVERSE;
+				pmove->fuser4 = NF_TRAVERSAL_TURN_MS;
+			}
+		}
+		pmove->onground = -1;
+	}
+	pmove->iuser4 = NF_TRAVERSAL_STATE( state, phase );
+	pmove->flFallVelocity = brush->iuser1 == NF_TRAVERSAL_CABLE ? 0 : max( 0, -pmove->velocity[2] );
+	pmove->cmd.forwardmove = pmove->cmd.sidemove = pmove->cmd.upmove = 0;
+	if( brush->iuser1 == NF_TRAVERSAL_WALL )
+	{
+		PM_AddCorrectGravity();
+		if( pmove->onground != -1 ) pmove->velocity[2] = 0;
+		VectorAdd( pmove->velocity, pmove->basevelocity, pmove->velocity );
+		PM_FlyMove();
+		VectorSubtract( pmove->velocity, pmove->basevelocity, pmove->velocity );
+		PM_CatagorizePosition();
+		PM_FixupGravityVelocity();
+		if( pmove->onground != -1 ) pmove->velocity[2] = 0;
+	}
+	else
+	{
+		PM_FlyMove();
+		PM_CheckWater();
+	}
+	return true;
+}
+
 /*
 =============
 PlayerMove
@@ -3039,6 +3229,7 @@ void PM_PlayerMove( qboolean server )
 	// Special handling for spectator and observers. (iuser1 is set if the player's in observer mode)
 	if( pmove->spectator || pmove->iuser1 > 0 )
 	{
+		if( pmove->iuser4 ) PM_TraversalRelease();
 		PM_SpectatorMove();
 		PM_CatagorizePosition();
 		return;
@@ -3062,6 +3253,8 @@ void PM_PlayerMove( qboolean server )
 
 	// Store off the starting water level
 	pmove->oldwaterlevel = pmove->waterlevel;
+
+	if( PM_TraversalMove() ) return;
 
 	// If we are not on ground, store off how fast we are moving down
 	if( pmove->onground == -1 )

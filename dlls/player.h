@@ -330,6 +330,16 @@ public:
 	// triggers (CHalfLifeRules::PlayerSpawn / PlayerThink); saved
 	float m_flNFEquipTime;
 
+	EHANDLE m_hNFTraversalBrush;
+	EHANDLE m_hNFTraversalWeapon;
+	int m_iNFTraversalState;
+	float m_flNFTraversalTimer;
+	BOOL m_fNFTraversalHolstered;
+	string_t m_iszNFTraversalModel, m_iszNFTraversalViewModel, m_iszNFTraversalWeaponModel;
+	string_t m_iszNFTraversalMap;
+	int m_iNFTraversalBody, m_iNFTraversalSkin;
+	int m_iNFTraversalSyncedState;
+
 	// use icon shown ("SetHudIcon", dlls/nf_lasertarget.cpp); not saved: the
 	// client starts without one
 	int m_iNFHudIcon;

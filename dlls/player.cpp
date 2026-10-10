@@ -40,6 +40,7 @@
 #include "nf_env.h"
 #include "nf_lasertarget.h"
 #include "nf_debug.h"
+#include "nf_traversal.h"
 
 // #define DUCKFIX
 
@@ -131,6 +132,17 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_iNFTotalMoments, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iNFTotalSecrets, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_flNFMissionStart, FIELD_TIME ),
+	DEFINE_FIELD( CBasePlayer, m_hNFTraversalBrush, FIELD_EHANDLE ),
+	DEFINE_FIELD( CBasePlayer, m_hNFTraversalWeapon, FIELD_EHANDLE ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTraversalState, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_flNFTraversalTimer, FIELD_FLOAT ),
+	DEFINE_FIELD( CBasePlayer, m_fNFTraversalHolstered, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFTraversalModel, FIELD_MODELNAME ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFTraversalViewModel, FIELD_MODELNAME ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFTraversalWeaponModel, FIELD_MODELNAME ),
+	DEFINE_FIELD( CBasePlayer, m_iszNFTraversalMap, FIELD_STRING ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTraversalBody, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_iNFTraversalSkin, FIELD_INTEGER ),
 
 	//DEFINE_FIELD( CBasePlayer, m_fDeadTime, FIELD_FLOAT ), // only used in multiplayer games
 	//DEFINE_FIELD( CBasePlayer, m_fGameHUDInitialized, FIELD_INTEGER ), // only used in multiplayer games
@@ -948,6 +960,7 @@ entvars_t *g_pevLastInflictor;  // Set in combat.cpp.  Used to pass the damage i
 
 void CBasePlayer::Killed( entvars_t *pevAttacker, int iGib )
 {
+	NF_TraversalReset( this, FALSE );
 	CSound *pSound;
 
 	// Holster weapon immediately, to allow it to cleanup
@@ -1029,6 +1042,7 @@ void CBasePlayer::Killed( entvars_t *pevAttacker, int iGib )
 // Set the activity based on an event or current state
 void CBasePlayer::SetAnimation( PLAYER_ANIM playerAnim )
 {
+	if( pev->iuser4 && playerAnim != PLAYER_DIE ) return;
 	int animDesired;
 	float speed;
 	char szAnim[64];
@@ -1502,6 +1516,7 @@ void CBasePlayer::StartDeathCam( void )
 
 void CBasePlayer::StartObserver( Vector vecPosition, Vector vecViewAngle )
 {
+	NF_TraversalReset( this, FALSE );
 	// clear any clientside entities attached to this player
 	MESSAGE_BEGIN( MSG_PAS, SVC_TEMPENTITY, pev->origin );
 		WRITE_BYTE( TE_KILLPLAYERATTACHMENTS );
@@ -1574,6 +1589,7 @@ void CBasePlayer::StartObserver( Vector vecPosition, Vector vecViewAngle )
 
 void CBasePlayer::PlayerUse( void )
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( IsObserver() )
 		return;
 
@@ -1694,6 +1710,7 @@ void CBasePlayer::PlayerUse( void )
 
 void CBasePlayer::Jump()
 {
+	if( pev->iuser4 ) return;
 	Vector vecWallCheckDir;// direction we're tracing a line to find a wall when walljumping
 	Vector vecAdjustedVelocity;
 	Vector vecSpot;
@@ -1769,6 +1786,7 @@ void FixPlayerCrouchStuck( edict_t *pPlayer )
 
 void CBasePlayer::Duck()
 {
+	if( pev->iuser4 ) return;
 	if( pev->button & IN_DUCK )
 	{
 		if( m_IdealActivity != ACT_LEAP )
@@ -1936,6 +1954,7 @@ void CBasePlayer::UpdateStatusBar()
 
 void CBasePlayer::PreThink( void )
 {
+	NF_TraversalPreThink( this );
 	int buttonsChanged = ( m_afButtonLast ^ pev->button );	// These buttons have changed this frame
 
 	// Debounced button codes for pressed/released
@@ -2540,7 +2559,8 @@ GLOBALS ASSUMED SET:  g_ulModelIndexPlayer
 */
 static void CheckPowerups( entvars_t *pev )
 {
-	if( pev->health <= 0 )
+	// Nightfire traversal keeps its own third-person model (dlls/nf_traversal.cpp)
+	if( pev->health <= 0 || pev->iuser4 )
 		return;
 
 	pev->modelindex = g_ulModelIndexPlayer;    // don't use eyes
@@ -2665,6 +2685,7 @@ void CBasePlayer::UpdatePlayerSound( void )
 
 void CBasePlayer::PostThink()
 {
+	NF_TraversalPostThink( this );
 	if( g_fGameOver )
 		goto pt_end;	// intermission or finale
 
@@ -2967,6 +2988,8 @@ ReturnSpot:
 
 void CBasePlayer::Spawn( void )
 {
+	NF_TraversalReset( this, FALSE );
+	pev->fuser4 = m_flNFTraversalTimer = 0;
 	m_flStartCharge = gpGlobals->time;
 	pev->classname = MAKE_STRING( "player" );
 	pev->health = 200;	// Nightfire: retail game.dll 0x420a24b3 (the HUD iris shows health / 24)
@@ -3126,6 +3149,8 @@ void CBasePlayer::Precache( void )
 
 int CBasePlayer::Save( CSave &save )
 {
+	m_iNFTraversalState = pev->iuser4;
+	m_flNFTraversalTimer = pev->fuser4;
 	if( !CBaseMonster::Save( save ) )
 		return 0;
 
@@ -3169,7 +3194,9 @@ int CBasePlayer::Restore( CRestore &restore )
 	// Copied from spawn() for now
 	m_bloodColor = BLOOD_COLOR_RED;
 
-	g_ulModelIndexPlayer = pev->modelindex;
+	// a traversal save stores 3rd_person.mdl in pev->model; keep the real player model
+	g_ulModelIndexPlayer = ( m_fNFTraversalHolstered && m_iszNFTraversalModel ) ?
+		MODEL_INDEX( STRING( m_iszNFTraversalModel )) : pev->modelindex;
 
 	if( FBitSet( pev->flags, FL_DUCKING ) )
 	{
@@ -3206,12 +3233,14 @@ int CBasePlayer::Restore( CRestore &restore )
 		m_flFlashLightTime = 1.0f;
 
 	m_nCustomSprayFrames = -1;
+	NF_TraversalRestore( this, !pSaveData->fUseLandmark );
 
 	return status;
 }
 
 void CBasePlayer::SelectNextItem( int iItem )
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	CBasePlayerItem *pItem;
 
 	pItem = m_rgpPlayerItems[iItem];
@@ -3258,6 +3287,7 @@ void CBasePlayer::SelectNextItem( int iItem )
 
 void CBasePlayer::SelectItem( const char *pstr )
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( !pstr )
 		return;
 
@@ -3310,6 +3340,7 @@ void CBasePlayer::SelectItem( const char *pstr )
 
 void CBasePlayer::SelectLastItem( void )
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( !m_pLastItem )
 	{
 		return;
@@ -3968,6 +3999,7 @@ Called every frame by the player PreThink
 */
 void CBasePlayer::ItemPreFrame()
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 #if CLIENT_WEAPONS
 	if( m_flNextAttack > 0 )
 #else
@@ -3992,6 +4024,7 @@ Called every frame by the player PostThink
 */
 void CBasePlayer::ItemPostFrame()
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	//static int fInSelect = FALSE;
 
 	// check if the player is using a tank
@@ -4660,6 +4693,7 @@ int CBasePlayer::GetCustomDecalFrames( void )
 //=========================================================
 void CBasePlayer::DropPlayerItem( char *pszItemName )
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return;
 	if( !g_pGameRules->IsMultiplayer() || ( weaponstay.value > 0 ) )
 	{
 		// no dropping in single player.
@@ -4823,6 +4857,7 @@ BOOL CBasePlayer::HasPlayerItemFromID( int nID )
 //=========================================================
 BOOL CBasePlayer::SwitchWeapon( CBasePlayerItem *pWeapon ) 
 {
+	if( pev->iuser4 || m_fNFTraversalHolstered ) return FALSE;
 	if( !pWeapon->CanDeploy() )
 	{
 		return FALSE;

@@ -168,6 +168,33 @@ void DLLEXPORT CAM_Think( void )
 	int i;
 #endif
 	vec3_t viewangles;
+	static int traversalCamera = 0;
+	static int previousThirdPerson = 0;
+	static float previousIdealYaw = 0;
+	cl_entity_t *local = gEngfuncs.GetLocalPlayer();
+	int traversal = local && local->curstate.iuser4 && !g_iUser1;
+	// wall phases: the model has its back to the wall, so look at its front
+	float traversalYaw = ( traversal && ( local->curstate.iuser4 & 15 ) <= 2 ) ? 180.0f : 0.0f;
+	if( traversal && !traversalCamera )
+	{
+		previousThirdPerson = cam_thirdperson;
+		previousIdealYaw = cam_idealyaw->value;
+		CAM_ToThirdPerson();
+		traversalCamera = cam_thirdperson;
+		if( traversalCamera )
+		{
+			gEngfuncs.GetViewAngles( (float *)viewangles );
+			cam_ofs[YAW] = viewangles[YAW] + traversalYaw;
+		}
+	}
+	else if( !traversal && traversalCamera )
+	{
+		gEngfuncs.Cvar_SetValue( "cam_idealyaw", previousIdealYaw );
+		if( !previousThirdPerson ) CAM_ToFirstPerson();
+		traversalCamera = 0;
+	}
+	if( traversalCamera && cam_idealyaw->value != traversalYaw )
+		gEngfuncs.Cvar_SetValue( "cam_idealyaw", traversalYaw );
 
 	if( gEngfuncs.GetMaxClients() > 1 && CL_IsThirdPerson() )
 		CAM_ToFirstPerson();
@@ -506,6 +533,20 @@ void CAM_ToFirstPerson( void )
 	gEngfuncs.Cvar_SetValue( "cam_command", 0 );
 }
 
+static void NF_TraversalClientInfo( void )
+{
+	if( ( (int)gEngfuncs.pfnGetCvarFloat( "nf_debug" ) & 128 ) == 0 ) return;
+	cl_entity_t *local = gEngfuncs.GetLocalPlayer();
+	if( local )
+	{
+		vec3_t view;
+		gEngfuncs.GetViewAngles( (float *)view );
+		gEngfuncs.Con_Printf( "nf_debug: cl: traversal state %d phase %d timer %.1f camera %d origin %.2f %.2f %.2f camyaw %.1f viewyaw %.1f\n",
+			local->curstate.iuser4, local->curstate.iuser4 & 15, local->curstate.fuser4, cam_thirdperson,
+			local->origin[0], local->origin[1], local->origin[2], cam_ofs[YAW], view[YAW] );
+	}
+}
+
 void CAM_ToggleSnapto( void )
 { 
 	cam_snapto->value = !cam_snapto->value;
@@ -526,6 +567,7 @@ void CAM_Init( void )
 	gEngfuncs.pfnAddCommand( "+camout", CAM_OutDown );
 	gEngfuncs.pfnAddCommand( "-camout", CAM_OutUp );
 	gEngfuncs.pfnAddCommand( "thirdperson", CAM_ToThirdPerson );
+	gEngfuncs.pfnAddCommand( "nf_traversalclient", NF_TraversalClientInfo );
 	gEngfuncs.pfnAddCommand( "firstperson", CAM_ToFirstPerson );
 	gEngfuncs.pfnAddCommand( "+cammousemove",CAM_StartMouseMove);
 	gEngfuncs.pfnAddCommand( "-cammousemove",CAM_EndMouseMove);

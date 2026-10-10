@@ -18,6 +18,7 @@ project repo.
 #define NF_DBG_ITEMS	16	// pickups: health before / after
 #define NF_DBG_EFFECTS	32	// particles, entity lights, rain/snow settings and resend
 #define NF_DBG_VEHICLES	64	// pathtruck clip link, goals, use, restore, blocking
+#define NF_DBG_TRAVERSAL	128	// cable/wall state changes and read-only reports
 
 // current nf_debug value (server: dlls/nf_debug.cpp, client: cl_dll/hl/hl_weapons.cpp)
 int NF_DebugBits( void );
