@@ -35,6 +35,7 @@
 #include "gamerules.h"
 #include "game.h"
 #include "nf_debug.h"
+#include "nf_character.h"
 
 #define MONSTER_CUT_CORNER_DIST		8 // 8 means the monster's bounding box is contained without the box of the node in WC
 
@@ -2978,6 +2979,10 @@ void CBaseMonster::KeyValue( KeyValueData *pkvd )
 BOOL CBaseMonster::FCheckAITrigger( void )
 {
 	BOOL fFireTarget;
+
+	// Nightfire characters use the retail bitmask; stock monsters keep the HL enum.
+	if( NF_IsTriggerMaskCharacter( this ))
+		return NF_CheckCharacterAITrigger( this );
 
 	if( m_iTriggerCondition == AITRIGGER_NONE )
 	{

@@ -7,6 +7,9 @@
 #include "nf_weapons.h"
 #include "nf_gadgets.h"
 #include "nf_debug.h"
+
+// retail closes the camera with the literal normal view FOV 76 (the client default_fov_dontchange default)
+#define NF_LIGHTER_FOV_NORMAL 76
 extern int gmsgNFCameraMode;
 class CNFPictureTarget : public CPointEntity {};
 LINK_ENTITY_TO_CLASS( info_picture_target, CNFPictureTarget )
@@ -31,16 +34,25 @@ public:
 	void End( void )
 	{
 		NF_PhotoCharacterPose( m_pose, FALSE ); m_pose = NULL;
-		if( m_camera && m_pPlayer ) m_pPlayer->pev->fov = m_pPlayer->m_iFOV = m_oldFOV;
+		if( m_camera && m_pPlayer )
+		{
+			m_pPlayer->pev->fov = m_pPlayer->m_iFOV = NF_LIGHTER_FOV_NORMAL;
+			if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: camera closed fov %d\n", m_pPlayer->m_iFOV );
+		}
 		m_camera = FALSE; m_ready = 0; Overlay( 0 );
 	}
-	void Holster( int skiplocal = 0 ) { End(); CBasePlayerWeapon::Holster( skiplocal ); }
+	void Holster( int skiplocal = 0 )
+	{
+		End();
+		if( m_pPlayer ) m_pPlayer->pev->fov = m_pPlayer->m_iFOV = NF_LIGHTER_FOV_NORMAL;	// retail 0x420DFD70 resets unconditionally
+		CBasePlayerWeapon::Holster( skiplocal );
+	}
 	void UpdateOnRemove( void ) { End(); CBasePlayerWeapon::UpdateOnRemove(); }
 	void SecondaryAttack( void )
 	{
 		if( m_ready > gpGlobals->time ) return;
 		if( m_camera ) { SendWeaponAnim( 5 ); End(); }
-		else { m_oldFOV = m_pPlayer->m_iFOV; m_camera = TRUE; m_ready = gpGlobals->time + 1.96f; SendWeaponAnim( 3 ); }
+		else { m_camera = TRUE; m_ready = gpGlobals->time + 1.96f; SendWeaponAnim( 3 ); }
 		m_flNextPrimaryAttack = gpGlobals->time + 1.96f; m_flNextSecondaryAttack = gpGlobals->time + 2.96f;
 	}
 	BOOL MarkerVisible( CBaseEntity *entity )
@@ -59,6 +71,11 @@ public:
 		Vector eye = m_pPlayer->EyePosition();
 		UTIL_TraceLine( eye, eye + gpGlobals->v_forward * 100, dont_ignore_monsters, dont_ignore_glass, m_pPlayer->edict(), &tr );
 		CBaseEntity *entity = tr.flFraction < 1 ? CBaseEntity::Instance( tr.pHit ) : NULL;
+		if( NF_DEBUG( NF_DBG_WEAPONS ) && entity != m_dbgHit )
+		{
+			m_dbgHit = entity;
+			ALERT( at_console, "nf_debug: camera aim %s fraction %.2f hitgroup %d\n", entity ? STRING( entity->pev->classname ) : "none", tr.flFraction, tr.iHitgroup );
+		}
 		return NF_PhotoCharacterTarget( entity ) ? entity : NULL;
 	}
 	void PrimaryAttack( void )
@@ -88,10 +105,20 @@ public:
 		}
 		CBasePlayerWeapon::ItemPostFrame();
 	}
-	void WeaponIdle( void ) { if( gpGlobals->time >= m_flTimeWeaponIdle ) { if( !m_camera ) SendWeaponAnim( 0 ); m_flTimeWeaponIdle = gpGlobals->time + 5; } }
+	// retail CLighter 0x420DFD50: no holster during the open transition or in camera mode
+	BOOL CanHolster( void ) { return !m_camera; }
+	// retail WeaponIdle 0x420E0190: anim 0/1 every 8-16 s; the camera-mode idle (anim 4) is not ported
+	// because this port's shutter overlay already uses the idle timer
+	void WeaponIdle( void )
+	{
+		if( gpGlobals->time < m_flTimeWeaponIdle ) return;
+		if( m_camera ) { m_flTimeWeaponIdle = gpGlobals->time + 5; return; }
+		SendWeaponAnim( RANDOM_LONG( 0, 1 ));
+		m_flTimeWeaponIdle = gpGlobals->time + RANDOM_FLOAT( 8, 16 );
+	}
 	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
-	BOOL m_camera; float m_ready; int m_oldFOV; EHANDLE m_pose;
+	BOOL m_camera; float m_ready; EHANDLE m_pose; CBaseEntity *m_dbgHit;
 };
-TYPEDESCRIPTION CNFLighter::m_SaveData[] = { DEFINE_FIELD( CNFLighter, m_camera, FIELD_BOOLEAN ), DEFINE_FIELD( CNFLighter, m_ready, FIELD_TIME ), DEFINE_FIELD( CNFLighter, m_oldFOV, FIELD_INTEGER ), DEFINE_FIELD( CNFLighter, m_pose, FIELD_EHANDLE ) };
+TYPEDESCRIPTION CNFLighter::m_SaveData[] = { DEFINE_FIELD( CNFLighter, m_camera, FIELD_BOOLEAN ), DEFINE_FIELD( CNFLighter, m_ready, FIELD_TIME ), DEFINE_FIELD( CNFLighter, m_pose, FIELD_EHANDLE ) };
 IMPLEMENT_SAVERESTORE( CNFLighter, CBasePlayerWeapon )
 LINK_ENTITY_TO_CLASS( weapon_lighter, CNFLighter )

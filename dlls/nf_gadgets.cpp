@@ -8,6 +8,7 @@
 #include "nf_weapons.h"
 #include "nf_gadgets.h"
 #include "nf_debug.h"
+#include "gamerules.h"
 
 extern int gmsgNFVisionMode, gmsgNFCameraMode, gmsgFlashBattery;
 
@@ -55,27 +56,57 @@ public:
 		CNFGadget::Precache();
 		for( int i = 1; i <= 3; i++ ) PRECACHE_SOUND( UTIL_VarArgs( "weapons/dukes_impact%d.wav", i ));
 	}
-	void PrimaryAttack( void )
+	BOOL Deploy( void ) { m_secondHit = 0; BOOL ok = CNFGadget::Deploy(); m_flTimeWeaponIdle = gpGlobals->time + 0.5f; return ok; }	// retail 0x420d7570
+	void Holster( int skiplocal = 0 ) { m_secondHit = 0; CBasePlayerWeapon::Holster( skiplocal ); }
+	// Retail CDukes attack helper 0x420D78B0: 32-unit trace (hull fallback); in single player a victim facing within
+	// 45 degrees of the player's yaw (hit from behind) takes its whole health; the delayed second punch of the
+	// double-punch combo does half damage. Damage of an ordinary front hit (50) is skill bullet type 0.
+	void Punch( BOOL firstPunch )
 	{
 		UTIL_MakeVectors( m_pPlayer->pev->v_angle + m_pPlayer->pev->punchangle );
-		Vector src = m_pPlayer->GetGunPosition(), end = src + gpGlobals->v_forward * 64;
+		Vector src = m_pPlayer->GetGunPosition(), end = src + gpGlobals->v_forward * 32;
 		TraceResult tr;
 		UTIL_TraceLine( src, end, dont_ignore_monsters, m_pPlayer->edict(), &tr );
 		if( tr.flFraction == 1 ) UTIL_TraceHull( src, end, dont_ignore_monsters, head_hull, m_pPlayer->edict(), &tr );
 		CBaseEntity *hit = tr.flFraction < 1 ? CBaseEntity::Instance( tr.pHit ) : NULL;
+		float damage = 0;
 		if( hit )
 		{
-			ClearMultiDamage(); hit->TraceAttack( m_pPlayer->pev, 50, gpGlobals->v_forward, &tr, DMG_CLUB );
+			damage = firstPunch ? 50.0f : 25.0f;
+			if( !g_pGameRules->IsMultiplayer() && fabs( UTIL_AngleDiff( hit->pev->angles.y, m_pPlayer->pev->v_angle.y )) <= 45.0f )
+				damage = hit->pev->health;
+			ClearMultiDamage(); hit->TraceAttack( m_pPlayer->pev, damage, gpGlobals->v_forward, &tr, DMG_CLUB );
 			ApplyMultiDamage( pev, m_pPlayer->pev );
-			EMIT_SOUND( m_pPlayer->edict(), CHAN_WEAPON, UTIL_VarArgs( "weapons/dukes_impact%d.wav", RANDOM_LONG( 1, 3 )), 1, ATTN_NORM );
+			int cls = hit->Classify();
+			if( cls != CLASS_NONE && cls != CLASS_MACHINE )
+				EMIT_SOUND( m_pPlayer->edict(), CHAN_WEAPON, UTIL_VarArgs( "weapons/dukes_impact%d.wav", RANDOM_LONG( 1, 3 )), 1, ATTN_NORM );
 		}
 		SendWeaponAnim( RANDOM_LONG( 1, 2 )); m_pPlayer->SetAnimation( PLAYER_ATTACK1 );
-		m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->time + ( hit ? 0.5f : 1.0f );
-		m_flTimeWeaponIdle = gpGlobals->time + 2;
-		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: dukes hit %s damage 50\n", hit ? STRING( hit->pev->classname ) : "none" );
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: dukes hit %s damage %.0f\n", hit ? STRING( hit->pev->classname ) : "none", damage );
 	}
-	void SecondaryAttack( void ) { PrimaryAttack(); }
+	void PrimaryAttack( void )
+	{
+		Punch( TRUE );
+		// retail mode toggle (+0x11C): single punch with 0.5 s refire, then a double punch (second hit 0.45 s later) with 1.0 s refire
+		if( m_combo ) m_secondHit = gpGlobals->time + 0.45f;
+		m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->time + ( m_combo ? 1.0f : 0.5f );
+		m_flTimeWeaponIdle = gpGlobals->time + 2;
+		if( !m_combo ) m_combo = TRUE;
+	}
+	void ItemPostFrame( void )
+	{
+		if( m_secondHit > 0 && m_secondHit < gpGlobals->time )
+		{
+			m_secondHit = 0; m_combo = FALSE;
+			if( m_pPlayer->IsAlive()) Punch( FALSE );
+		}
+		CNFGadget::ItemPostFrame();
+	}
+	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
+	BOOL m_combo; float m_secondHit;
 };
+TYPEDESCRIPTION CNFDukes::m_SaveData[] = { DEFINE_FIELD( CNFDukes, m_combo, FIELD_BOOLEAN ), DEFINE_FIELD( CNFDukes, m_secondHit, FIELD_TIME ) };
+IMPLEMENT_SAVERESTORE( CNFDukes, CBasePlayerWeapon )
 LINK_ENTITY_TO_CLASS( weapon_dukes, CNFDukes )
 
 class CNFDart : public CBaseEntity
@@ -136,6 +167,7 @@ public:
 				UTIL_MakeVectors( m_pPlayer->pev->v_angle + m_pPlayer->pev->punchangle );
 				CBaseEntity *dart = CBaseEntity::Create( "dartpen", m_pPlayer->GetGunPosition() + gpGlobals->v_forward * 16, m_pPlayer->pev->v_angle, m_pPlayer->edict() );
 				if( dart ) { dart->pev->velocity = gpGlobals->v_forward * 2000; m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType]--; }
+				if( m_pPlayer->pev->movetype == MOVETYPE_WALK ) m_pPlayer->pev->velocity = m_pPlayer->pev->velocity - gpGlobals->v_forward * 16;	// retail 0x420E3CE0 recoil
 				if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: pen fired ammo %d\n", m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] );
 			}
 		}
@@ -219,22 +251,32 @@ LINK_ENTITY_TO_CLASS( item_drivetarget, CNFDrive )
 class CNFQWorm : public CNFGadget
 {
 public:
+	// Retail CQWorm (vtable 0x4213373C, docs: decomp-documentation/game-dll-gadgets.md): card model sequences 0 draw, 2 idle,
+	// 4 miss, 6 return; drive hold 7 (card->CD transition), 14 success, 15 failure.
 	int ID( void ) { return NF_WEAPON_QWORM; }
-	int DrawSequence( void ) { return 8; }
-	int IdleSequence( void ) { return 10; }
+	int DrawSequence( void ) { return 0; }
+	int IdleSequence( void ) { return 2; }
 	int Position( void ) { return 6; }
 	const char *ViewModel( void ) { return "models/v_qworm.mdl"; }
-	BOOL Valid( CNFDrive *drive )
+	BOOL Deploy( void ) { Cancel(); BOOL ok = CNFGadget::Deploy(); m_flTimeWeaponIdle = gpGlobals->time + 1.34f; return ok; }
+	// eye distance, line of sight and aim (retail 0x420E4900: view dot > 0.7)
+	BOOL Visible( CNFDrive *drive )
 	{
-		if( !drive || !drive->m_open || drive->m_inserted || !drive->pev->targetname ) return FALSE;
 		Vector eye = m_pPlayer->EyePosition(), dir = drive->pev->origin - eye;
 		UTIL_MakeVectors( m_pPlayer->pev->v_angle );
-		if( dir.Length() > 100 || DotProduct( dir.Normalize(), gpGlobals->v_forward ) <= 0.7f ) return FALSE;
+		if( DotProduct( dir.Normalize(), gpGlobals->v_forward ) <= 0.7f ) return FALSE;
 		TraceResult tr; UTIL_TraceLine( eye, drive->pev->origin + Vector( 0, 0, 2 ), ignore_monsters, dont_ignore_glass, m_pPlayer->edict(), &tr );
 		return tr.flFraction == 1 || tr.pHit == drive->edict();
 	}
+	BOOL Valid( CNFDrive *drive )
+	{
+		if( !drive || !drive->m_open || drive->m_inserted || !drive->pev->targetname ) return FALSE;
+		if(( drive->pev->origin - m_pPlayer->EyePosition()).Length() > 100 ) return FALSE;
+		return Visible( drive );
+	}
 	void DriveUse( CNFDrive *drive, USE_TYPE type, float value ) { if( drive && drive->pev->targetname ) FireTargets( STRING( drive->pev->targetname ), m_pPlayer, this, type, value ); }
-	void Cancel( void ) { CNFDrive *drive = (CNFDrive *)(CBaseEntity *)m_drive; DriveUse( drive, USE_OFF, 0 ); m_drive = NULL; m_stage = 0; m_stageTime = 0; }
+	void Unfreeze( void ) { if( m_pPlayer && m_stage ) m_pPlayer->pev->flags &= ~FL_FROZEN; }
+	void Cancel( void ) { Unfreeze(); CNFDrive *drive = (CNFDrive *)(CBaseEntity *)m_drive; if( m_stage ) DriveUse( drive, USE_OFF, 0 ); m_drive = NULL; m_stage = 0; m_stageTime = 0; }
 	void PrimaryAttack( void )
 	{
 		if( m_stage ) return;
@@ -242,22 +284,33 @@ public:
 		while(( entity = UTIL_FindEntityByClassname( entity, "item_drivetarget" )) != NULL )
 		{
 			CNFDrive *drive = (CNFDrive *)entity;
-			if( !Valid( drive ) || drive->m_inserting ) continue;
-			m_drive = drive; m_stage = 1; m_stageTime = gpGlobals->time + 1.33f;
-			DriveUse( drive, USE_ON, 0 ); SendWeaponAnim( 12 ); break;
+			if( !drive->m_open || drive->m_inserted || drive->m_inserting || !drive->pev->targetname ) continue;
+			// retail selects by the horizontal distance only
+			if(( drive->pev->origin - m_pPlayer->EyePosition()).Length2D() > 100 || !Visible( drive )) continue;
+			m_drive = drive; m_stage = 1; m_stageTime = gpGlobals->time + 2.33f;
+			DriveUse( drive, USE_ON, 0 ); SendWeaponAnim( 7 );
+			m_pPlayer->pev->flags |= FL_FROZEN;
+			m_flNextPrimaryAttack = m_flNextSecondaryAttack = m_flTimeWeaponIdle = gpGlobals->time + 2.33f;
+			if( NF_DEBUG( NF_DBG_ITEMS )) ALERT( at_console, "nf_debug: qworm hold %s\n", STRING( drive->pev->targetname ));
+			return;
 		}
-		m_flNextPrimaryAttack = gpGlobals->time + 0.5f;
+		SendWeaponAnim( 4 );
+		m_flNextPrimaryAttack = m_flNextSecondaryAttack = m_flTimeWeaponIdle = gpGlobals->time + 0.26f;
 	}
 	void ItemPostFrame( void )
 	{
 		if( m_stage )
 		{
 			CNFDrive *drive = (CNFDrive *)(CBaseEntity *)m_drive;
-			if( !(m_pPlayer->pev->button & IN_ATTACK) || !m_pPlayer->IsAlive() || !Valid( drive )) Cancel();
+			if( !m_pPlayer->IsAlive() || !drive ) Cancel();
 			else if( gpGlobals->time >= m_stageTime )
 			{
-				if( m_stage == 1 ) { m_stage = 2; m_stageTime = gpGlobals->time + 2.33f; SendWeaponAnim( 14 ); }
-				else { DriveUse( drive, USE_ON, 1 ); m_drive = NULL; m_stage = 0; m_stageTime = 0; m_flNextPrimaryAttack = gpGlobals->time + 1; }
+				// Retail only re-checks at the end of the hold; releasing the button does not cancel it.
+				BOOL ok = Valid( drive );
+				if( !ok ) { m_pPlayer->pev->flags &= ~FL_FROZEN; DriveUse( drive, USE_OFF, 0 ); SendWeaponAnim( 15 ); m_flNextPrimaryAttack = m_flNextSecondaryAttack = m_flTimeWeaponIdle = gpGlobals->time + 3.0f; }
+				else { m_pPlayer->pev->flags &= ~FL_FROZEN; DriveUse( drive, USE_ON, 1 ); SendWeaponAnim( 14 ); m_flNextPrimaryAttack = m_flNextSecondaryAttack = m_flTimeWeaponIdle = gpGlobals->time + 0.3f; }
+				if( NF_DEBUG( NF_DBG_ITEMS )) ALERT( at_console, "nf_debug: qworm %s %s\n", ok ? "inserted" : "failed", STRING( drive->pev->targetname ));
+				m_drive = NULL; m_stage = 0; m_stageTime = 0;
 			}
 			return;
 		}
@@ -281,8 +334,15 @@ public:
 	int Position( void ) { return 0; }
 	const char *ViewModel( void ) { return "models/v_glasses.mdl"; }
 	void Precache( void ) { CNFGadget::Precache(); PRECACHE_SOUND( "gadgets/nightvision_on.wav" ); PRECACHE_SOUND( "gadgets/nightvision_off.wav" ); PRECACHE_SOUND( "gadgets/nightvision_draw.wav" ); PRECACHE_SOUND( "gadgets/nightvision_loop.wav" ); }
-	BOOL Deploy( void ) { Toggle(); return CNFGadget::Deploy(); }
-	void PrimaryAttack( void ) { Toggle(); m_flNextPrimaryAttack = gpGlobals->time + 0.5f; }
+	BOOL Deploy( void ) { ToggleDelayed(); return CNFGadget::Deploy(); }
+	void PrimaryAttack( void ) { ToggleDelayed(); m_flNextPrimaryAttack = gpGlobals->time + 0.5f; }
+	// retail 0x420D8CD0 / 0x420D8F00: switching on takes effect 1.3 s later (after the draw); switching off is immediate
+	void ToggleDelayed( void )
+	{
+		if( m_on || m_pending ) { m_pending = FALSE; if( m_on ) Toggle(); return; }
+		if( !m_pPlayer || m_pPlayer->m_iFlashBattery <= 0 ) return;
+		m_pending = TRUE; m_activateAt = gpGlobals->time + 1.3f;
+	}
 	void SecondaryAttack( void ) { Mode(); m_flNextSecondaryAttack = gpGlobals->time + 0.5f; }
 	void Send( void )
 	{
@@ -304,6 +364,7 @@ public:
 	void Battery( void )
 	{
 		if( !m_pPlayer ) return;
+		if( m_pending && gpGlobals->time >= m_activateAt ) { m_pending = FALSE; if( !m_on ) Toggle(); }
 		if( m_batteryTime == 0 ) m_batteryTime = gpGlobals->time + (m_on ? Interval() : 0.29f);
 		if( gpGlobals->time >= m_batteryTime )
 		{
@@ -320,12 +381,12 @@ public:
 		}
 	}
 	void Mode( void ) { if( m_on ) { m_mode = m_mode % 3 + 1; m_batteryTime = gpGlobals->time + Interval(); Send(); } }
-	void Reset( void ) { if( m_on && m_pPlayer ) STOP_SOUND( m_pPlayer->edict(), CHAN_STATIC, "gadgets/nightvision_loop.wav" ); m_on = FALSE; Send(); }
+	void Reset( void ) { m_pending = FALSE; if( m_on && m_pPlayer ) STOP_SOUND( m_pPlayer->edict(), CHAN_STATIC, "gadgets/nightvision_loop.wav" ); m_on = FALSE; Send(); }
 	void UpdateOnRemove( void ) { Reset(); CBasePlayerWeapon::UpdateOnRemove(); }
 	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
-	BOOL m_on; int m_mode; float m_batteryTime; int m_battery;
+	BOOL m_on; int m_mode; float m_batteryTime; int m_battery; BOOL m_pending; float m_activateAt;
 };
-TYPEDESCRIPTION CNFGlasses::m_SaveData[] = { DEFINE_FIELD( CNFGlasses, m_on, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_mode, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_batteryTime, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_battery, FIELD_INTEGER ) };
+TYPEDESCRIPTION CNFGlasses::m_SaveData[] = { DEFINE_FIELD( CNFGlasses, m_on, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_mode, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_batteryTime, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_battery, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_pending, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_activateAt, FIELD_TIME ) };
 IMPLEMENT_SAVERESTORE( CNFGlasses, CBasePlayerWeapon )
 LINK_ENTITY_TO_CLASS( gadget_nightvision, CNFGlasses )
 

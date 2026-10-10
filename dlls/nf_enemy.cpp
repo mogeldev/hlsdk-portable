@@ -122,6 +122,7 @@ enum
 	TASK_NF_CORNER_FIRE,				// retail 134: step out, fire, step back
 	TASK_NF_TASER,
 	TASK_NF_BLIND,
+	TASK_NF_PHOTO_POSE,				// retail schedule 0x4B "NPCFacePlayerVogue": face the player and pose while photographed
 };
 
 //=========================================================
@@ -224,6 +225,7 @@ public:
 	BOOL CorpseSpotted( BOOL mark ) { BOOL spotted = m_fCorpseSpotted; if( mark ) m_fCorpseSpotted = TRUE; return spotted; }
 	string_t PhotoTarget( void ) { return IsAlive() ? m_iszCameraTarget : 0; }
 	void PhotoPose( BOOL enabled );
+	int NFSpawnflags( void ) { return m_iNFSpawnflags; }
 	BOOL m_fPhotoPose;
 	BOOL TaserAcquire( CBaseEntity *weapon );
 	BOOL TaserHeld( CBaseEntity *weapon );
@@ -360,16 +362,19 @@ public:
 		if( FStrEq( kv->szKeyName, "usetarget" )) { m_useTarget = ALLOC_STRING( kv->szValue ); kv->fHandled = TRUE; }
 		else CNightfireEnemy::KeyValue( kv );
 	}
+	// Retail CTalkCharacter::FollowerUse (0x420CAD50): not for retail class 4 (spawnflags 0xA00000),
+	// not while scripted; usetarget fires for any activator. Talk cooldown/use lock and follow/POK are not ported.
 	void EXPORT NPCUse( CBaseEntity *activator, CBaseEntity *caller, USE_TYPE type, float value )
 	{
-		if( !IsAlive() || m_MonsterState == MONSTERSTATE_SCRIPT || gpGlobals->time < m_nextUse || !activator || !activator->IsPlayer() ) return;
-		m_nextUse = gpGlobals->time + 1;
+		if( !IsAlive() || m_MonsterState == MONSTERSTATE_SCRIPT || ( NFSpawnflags() & 0xA00000 )) return;
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: npc %s use target %s\n", STRING( pev->targetname ), STRING( m_useTarget ));
 		if( m_useTarget ) FireTargets( STRING( m_useTarget ), activator, caller, type, value );
 	}
 	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
-	string_t m_useTarget; float m_nextUse;
+	string_t m_useTarget;
 };
-TYPEDESCRIPTION CNFPhotoNPC::m_SaveData[] = { DEFINE_FIELD( CNFPhotoNPC, m_useTarget, FIELD_STRING ), DEFINE_FIELD( CNFPhotoNPC, m_nextUse, FIELD_TIME ) };
+TYPEDESCRIPTION CNFPhotoNPC::m_SaveData[] = { DEFINE_FIELD( CNFPhotoNPC, m_useTarget, FIELD_STRING ) };
 IMPLEMENT_SAVERESTORE( CNFPhotoNPC, CNightfireEnemy )
 LINK_ENTITY_TO_CLASS( npc_aigeneric, CNFPhotoNPC )
 
@@ -501,6 +506,77 @@ void CNightfireEnemy::ReportCharacter( void )
 		STRING( pev->targetname ), STRING( m_iszDeathCamera ), m_iCoverID,
 		m_hAIEvent ? m_hAIEvent->entindex() : 0 );
 	ALERT( at_console, "nf_debug: character %s blind remaining %.2f\n", STRING( pev->targetname ), Q_max( 0.0f, m_flBlindUntil - gpGlobals->time ));
+}
+
+BOOL NF_IsTriggerMaskCharacter( CBaseEntity *entity )
+{
+	return entity && ( FClassnameIs( entity->pev, "enemy_generic" ) || FClassnameIs( entity->pev, "npc_aigeneric" ));
+}
+
+// Retail TriggerCondition bitmask (bit = 1 << (HL enum - 1), docs/retail/mission1.md).
+// No knockout provider exists yet, so 0x1000 never fires and 0x8/0x800 see knockout == 0.
+// Order and the 0x800 group-death quirk follow retail 0x42036360 (Ghidra-verified [offline]).
+// The retail death/knockout target strings at +0x2E8/+0x2EC are not handled here.
+BOOL NF_CheckCharacterAITrigger( CBaseMonster *monster )
+{
+	int &mask = monster->m_iTriggerCondition;
+	if( !mask ) return FALSE;
+
+	BOOL fire = FALSE;
+	const BOOL dead = monster->pev->deadflag != DEAD_NO;
+
+	if(( mask & 0x1 ) && monster->m_hEnemy != 0 && monster->m_hEnemy->IsPlayer() && monster->HasConditions( bits_COND_SEE_ENEMY ))
+	{ mask &= ~0x1; fire = TRUE; }
+	if(( mask & 0x200 ) && monster->HasConditions( bits_COND_SEE_CLIENT ))
+	{ mask &= ~0x200; fire = TRUE; }
+	if(( mask & 0x400 ) && monster->HasConditions( bits_COND_SEE_CLIENT ) &&
+		monster->m_MonsterState != MONSTERSTATE_COMBAT && monster->m_MonsterState != MONSTERSTATE_PRONE &&
+		monster->m_MonsterState != MONSTERSTATE_SCRIPT )
+	{ mask &= ~0x400; fire = TRUE; }
+	if(( mask & 0x2 ) && monster->HasConditions( bits_COND_LIGHT_DAMAGE | bits_COND_HEAVY_DAMAGE ))
+		fire = TRUE;	// stays armed, fires per damage
+	if(( mask & 0x8 ) && dead )
+	{ mask &= ~0x8; fire = TRUE; }
+	if( mask & 0x800 )
+	{
+		if( dead )
+		{
+			fire = TRUE;
+			if( FStringNull( monster->pev->netname ) || !STRING( monster->pev->netname )[0] )
+				fire = FALSE;
+			else
+			{
+				CBaseEntity *other = NULL;
+				while(( other = UTIL_FindEntityByString( other, "netname", STRING( monster->pev->netname ))) != NULL )
+				{
+					if( other != monster && other->pev->deadflag == DEAD_NO )
+					{ fire = FALSE; break; }
+				}
+			}
+		}
+		if( fire ) mask &= ~0x800;
+	}
+	if(( mask & 0x4 ) && monster->IsAlive() && monster->pev->health <= monster->pev->max_health / 2 )
+	{ mask &= ~0x4; fire = TRUE; }
+	if( monster->HasConditions( bits_COND_HEAR_SOUND ))
+	{
+		if(( mask & 0x40 ) && ( monster->m_afSoundTypes & bits_SOUND_WORLD ))
+		{ mask &= ~0x40; fire = TRUE; }
+		if(( mask & 0x80 ) && ( monster->m_afSoundTypes & bits_SOUND_PLAYER ))
+		{ mask &= ~0x80; fire = TRUE; }
+		if(( mask & 0x100 ) && ( monster->m_afSoundTypes & bits_SOUND_COMBAT ))
+		{ mask &= ~0x100; fire = TRUE; }
+	}
+
+	if( fire )
+	{
+		ALERT( at_aiconsole, "AI Trigger Fire Target\n" );
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: aitrigger %s fired target %s remaining mask %d\n",
+				STRING( monster->pev->targetname ), STRING( monster->m_iszTriggerTarget ), mask );
+		FireTargets( STRING( monster->m_iszTriggerTarget ), monster, monster, USE_TOGGLE, 0 );
+	}
+	return fire;
 }
 
 BOOL NF_EnemyChangeCharacter( CBaseEntity *entity, const nf_character_change_t &change )
@@ -747,11 +823,17 @@ BOOL CNightfireEnemy::CheckRangeAttack1( float flDot, float flDist )
 #define NF_ACT_FLINCH_LEFTLEG	76
 #define NF_ACT_FLINCH_RIGHTLEG	77
 
+extern Schedule_t slNFPhotoPose[];
+
 void CNightfireEnemy::PhotoPose( BOOL enabled )
 {
 	if( m_fPhotoPose == enabled ) return;
 	m_fPhotoPose = enabled;
-	if( IsAlive() && m_MonsterState != MONSTERSTATE_SCRIPT && m_MonsterState != MONSTERSTATE_COMBAT ) SetActivity( ACT_IDLE );
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: photo pose %s %s\n", STRING( pev->targetname ), enabled ? "on" : "off" );
+	if( !IsAlive() || m_MonsterState == MONSTERSTATE_SCRIPT || m_MonsterState == MONSTERSTATE_COMBAT ) return;
+	if( enabled && !m_hTaserWeapon ) ChangeSchedule( slNFPhotoPose );
+	else SetActivity( ACT_IDLE );
 }
 
 string_t NF_PhotoCharacterTarget( CBaseEntity *entity )
@@ -1246,6 +1328,9 @@ Schedule_t slNFTaser[] =
 Task_t tlNFBlind[] = { { TASK_STOP_MOVING, 0 }, { TASK_NF_BLIND, 0 } };
 Schedule_t slNFBlind[] = { { tlNFBlind, ARRAYSIZE( tlNFBlind ), 0, 0, "NFBlind" } };
 
+Task_t tlNFPhotoPose[] = { { TASK_STOP_MOVING, 0 }, { TASK_NF_PHOTO_POSE, 0 } };
+Schedule_t slNFPhotoPose[] = { { tlNFPhotoPose, ARRAYSIZE( tlNFPhotoPose ), 0, 0, "NFPhotoPose" } };
+
 void CNightfireEnemy::Blind( float duration )
 {
 	if( !IsAlive() || duration <= 0 || m_MonsterState == MONSTERSTATE_SCRIPT ) return;
@@ -1328,6 +1413,7 @@ DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 	slNFDuctAttack,
 	slNFTaser,
 	slNFBlind,
+	slNFPhotoPose,
 };
 
 IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
@@ -1711,6 +1797,9 @@ Schedule_t *CNightfireEnemy::GetSchedule( void )
 	if( IsAlive() && !m_hTaserWeapon && m_flBlindUntil > gpGlobals->time ) return slNFBlind;
 	if( IsAlive() && m_hTaserWeapon != 0 )
 		return slNFTaser;
+	// retail GetSchedule 0x4206BAC0 checks the photo-pose memory bit right after the script/dead cases
+	if( IsAlive() && m_fPhotoPose && m_MonsterState != MONSTERSTATE_COMBAT && m_MonsterState != MONSTERSTATE_SCRIPT )
+		return slNFPhotoPose;
 	if( IsAlive() && InCover())
 	{
 		Schedule_t *pCover = GetCoverSchedule();
@@ -1806,6 +1895,13 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 		int sequence = LookupSequence( "blinded" );
 		if( sequence >= 0 ) { pev->sequence = sequence; pev->frame = 0; ResetSequenceInfo(); }
 		else SetActivity( ACT_BIG_FLINCH );
+		break;
+	}
+	case TASK_NF_PHOTO_POSE:
+	{
+		CBaseEntity *player = UTIL_PlayerByIndex( 1 );
+		if( player ) MakeIdealYaw( player->pev->origin );
+		SetActivity( ACT_IDLE );
 		break;
 	}
 	case TASK_NF_TASER:
@@ -1934,6 +2030,15 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 		}
 		else if( m_fSequenceFinished ) { pev->frame = 0; ResetSequenceInfo(); }
 		break;
+	case TASK_NF_PHOTO_POSE:
+	{
+		pev->velocity = g_vecZero;
+		CBaseEntity *player = UTIL_PlayerByIndex( 1 );
+		if( player ) MakeIdealYaw( player->pev->origin );
+		ChangeYaw( pev->yaw_speed );
+		if( !m_fPhotoPose ) TaskComplete();
+		break;
+	}
 	case TASK_NF_TASER:
 		if( m_hTaserWeapon == 0 )
 		{
