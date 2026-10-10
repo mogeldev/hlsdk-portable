@@ -251,7 +251,7 @@ LINK_ENTITY_TO_CLASS( item_drivetarget, CNFDrive )
 class CNFQWorm : public CNFGadget
 {
 public:
-	// Retail CQWorm (vtable 0x4213373C, docs: decomp-documentation/game-dll-gadgets.md): card model sequences 0 draw, 2 idle,
+	// Retail CQWorm (vtable 0x4213373C, docs/retail/gadgets-retail.md): card model sequences 0 draw, 2 idle,
 	// 4 miss, 6 return; drive hold 7 (card->CD transition), 14 success, 15 failure.
 	int ID( void ) { return NF_WEAPON_QWORM; }
 	int DrawSequence( void ) { return 0; }
