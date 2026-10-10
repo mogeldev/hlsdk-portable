@@ -485,7 +485,7 @@ extern DLL_GLOBAL const Vector g_vecZero;
 // Sound Utilities
 
 // sentence groups
-#define CBSENTENCENAME_MAX 16
+#define CBSENTENCENAME_MAX 32 // retail sentence names are longer than 15 characters; 16 overflowed (aborts on Android)
 
 #define CVOXFILESENTENCEMAX_GOLDSOURCE_LEGACY 1536
 #define CVOXFILESENTENCEMAX_GOLDSOURCE_ANNIVERSARY_25 2048
