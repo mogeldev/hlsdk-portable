@@ -67,7 +67,17 @@ public:
 		Vector src = m_pPlayer->GetGunPosition(), end = src + gpGlobals->v_forward * 32;
 		TraceResult tr;
 		UTIL_TraceLine( src, end, dont_ignore_monsters, m_pPlayer->edict(), &tr );
-		if( tr.flFraction == 1 ) UTIL_TraceHull( src, end, dont_ignore_monsters, head_hull, m_pPlayer->edict(), &tr );
+		if( tr.flFraction == 1 )
+		{
+			UTIL_TraceHull( src, end, dont_ignore_monsters, head_hull, m_pPlayer->edict(), &tr );
+			// retail 0x420D78B0: a hull-only hit pushes a walking player back 64 units
+			// (the four-corner retry for BSP entities, 0x420D7670, only picks the nearest wall hit and is not ported)
+			if( tr.flFraction < 1 && m_pPlayer->pev->movetype == MOVETYPE_WALK )
+			{
+				m_pPlayer->pev->velocity = m_pPlayer->pev->velocity - gpGlobals->v_forward * 64;
+				if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: dukes hull pushback\n" );
+			}
+		}
 		CBaseEntity *hit = tr.flFraction < 1 ? CBaseEntity::Instance( tr.pHit ) : NULL;
 		float damage = 0;
 		if( hit )
@@ -259,6 +269,8 @@ public:
 	int Position( void ) { return 6; }
 	const char *ViewModel( void ) { return "models/v_qworm.mdl"; }
 	BOOL Deploy( void ) { Cancel(); BOOL ok = CNFGadget::Deploy(); m_flTimeWeaponIdle = gpGlobals->time + 1.34f; return ok; }
+	// retail sends LockView (angles) and LockWeapons (1, 0xff) during the hold: no weapon switching meanwhile
+	BOOL CanHolster( void ) { return !m_stage; }
 	// eye distance, line of sight and aim (retail 0x420E4900: view dot > 0.7)
 	BOOL Visible( CNFDrive *drive )
 	{
@@ -339,9 +351,47 @@ public:
 	// retail 0x420D8CD0 / 0x420D8F00: switching on takes effect 1.3 s later (after the draw); switching off is immediate
 	void ToggleDelayed( void )
 	{
-		if( m_on || m_pending ) { m_pending = FALSE; if( m_on ) Toggle(); return; }
-		if( !m_pPlayer || m_pPlayer->m_iFlashBattery <= 0 ) return;
+		if( m_on || m_pending )
+		{
+			m_pending = FALSE; if( m_on ) Toggle();
+			if( m_hReturn ) m_returnAt = gpGlobals->time + 1.0f;
+			return;
+		}
+		if( !m_pPlayer || m_pPlayer->m_iFlashBattery <= 0 )
+		{
+			if( m_hReturn ) m_returnAt = gpGlobals->time + 1.0f;
+			return;
+		}
 		m_pending = TRUE; m_activateAt = gpGlobals->time + 1.3f;
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: glasses switch-on pending until %.2f (now %.2f)\n", m_activateAt, gpGlobals->time );
+	}
+	// retail "uvvision" 0x420A3380 / 0x420A3490: draws the glasses (2 s command cooldown), the switch happens in the
+	// deploy (on 1.3 s after the draw, off at once) and the previous weapon comes back 0.5 s after switching on, 1.0 s after switching off
+	void CommandToggle( void )
+	{
+		if( !m_pPlayer || gpGlobals->time < m_cmdCooldown || m_hReturn ) return;
+		m_cmdCooldown = gpGlobals->time + 2.0f;
+		if( m_pPlayer->m_pActiveItem == this ) { ToggleDelayed(); return; }
+		m_hReturn = m_pPlayer->m_pActiveItem;
+		m_returnAt = 0;
+		m_pPlayer->SelectItem( STRING( pev->classname ));
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: uvvision draws the glasses\n" );
+	}
+	// retail LockWeapons while the glasses are drawn by the command
+	BOOL CanHolster( void ) { return !m_hReturn; }
+	void ReturnThink( void )
+	{
+		if( !m_hReturn ) return;
+		if( m_returnAt == 0 )
+		{
+			// the draw never happened (selection refused): drop the pending return
+			if( gpGlobals->time > m_cmdCooldown ) m_hReturn = NULL;
+			return;
+		}
+		if( gpGlobals->time < m_returnAt ) return;
+		CBaseEntity *previous = m_hReturn;
+		m_hReturn = NULL; m_returnAt = 0;
+		if( previous && m_pPlayer ) m_pPlayer->SelectItem( STRING( previous->pev->classname ));
 	}
 	void SecondaryAttack( void ) { Mode(); m_flNextSecondaryAttack = gpGlobals->time + 0.5f; }
 	void Send( void )
@@ -364,7 +414,12 @@ public:
 	void Battery( void )
 	{
 		if( !m_pPlayer ) return;
-		if( m_pending && gpGlobals->time >= m_activateAt ) { m_pending = FALSE; if( !m_on ) Toggle(); }
+		if( m_pending && gpGlobals->time >= m_activateAt )
+		{
+			m_pending = FALSE; if( !m_on ) Toggle();
+			if( m_hReturn ) m_returnAt = gpGlobals->time + 0.5f;
+		}
+		ReturnThink();
 		if( m_batteryTime == 0 ) m_batteryTime = gpGlobals->time + (m_on ? Interval() : 0.29f);
 		if( gpGlobals->time >= m_batteryTime )
 		{
@@ -385,8 +440,9 @@ public:
 	void UpdateOnRemove( void ) { Reset(); CBasePlayerWeapon::UpdateOnRemove(); }
 	int Save( CSave &save ); int Restore( CRestore &restore ); static TYPEDESCRIPTION m_SaveData[];
 	BOOL m_on; int m_mode; float m_batteryTime; int m_battery; BOOL m_pending; float m_activateAt;
+	EHANDLE m_hReturn; float m_returnAt; float m_cmdCooldown;
 };
-TYPEDESCRIPTION CNFGlasses::m_SaveData[] = { DEFINE_FIELD( CNFGlasses, m_on, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_mode, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_batteryTime, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_battery, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_pending, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_activateAt, FIELD_TIME ) };
+TYPEDESCRIPTION CNFGlasses::m_SaveData[] = { DEFINE_FIELD( CNFGlasses, m_hReturn, FIELD_EHANDLE ), DEFINE_FIELD( CNFGlasses, m_returnAt, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_cmdCooldown, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_on, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_mode, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_batteryTime, FIELD_TIME ), DEFINE_FIELD( CNFGlasses, m_battery, FIELD_INTEGER ), DEFINE_FIELD( CNFGlasses, m_pending, FIELD_BOOLEAN ), DEFINE_FIELD( CNFGlasses, m_activateAt, FIELD_TIME ) };
 IMPLEMENT_SAVERESTORE( CNFGlasses, CBasePlayerWeapon )
 LINK_ENTITY_TO_CLASS( gadget_nightvision, CNFGlasses )
 
@@ -453,6 +509,6 @@ BOOL NF_GadgetCommand( CBaseEntity *entity, const char *command )
 		return TRUE;
 	}
 	if( !player->IsAlive() || player->m_hNFDeathCamera != 0 || (player->pev->flags & FL_FROZEN) ) return TRUE;
-	if( glasses ) { if( toggle ) glasses->Toggle(); else glasses->Mode(); }
+	if( glasses ) { if( toggle ) glasses->CommandToggle(); else glasses->Mode(); }
 	return TRUE;
 }

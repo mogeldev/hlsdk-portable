@@ -224,6 +224,9 @@ public:
 	void NFCountEnemy( CBaseEntity *pPlayer );
 	void ChangeCharacter( const nf_character_change_t &change );
 	void ReportCharacter( void );
+	// retail CBaseCharacter +0x380: time a knocked-out character wakes (0 = not knocked out)
+	float m_flKnockout;
+	void KnockoutWake( void );
 	BOOL CorpseSpotted( BOOL mark ) { BOOL spotted = m_fCorpseSpotted; if( mark ) m_fCorpseSpotted = TRUE; return spotted; }
 	string_t PhotoTarget( void ) { return IsAlive() ? m_iszCameraTarget : 0; }
 	void PhotoPose( BOOL enabled );
@@ -275,6 +278,7 @@ private:
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
+	string_t m_iszKnockoutTarget;
 	string_t m_iszDeathCamera;
 	string_t m_iszRescueTarget;
 	string_t m_iszCameraTarget;
@@ -313,6 +317,8 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 {
 	DEFINE_FIELD( CNightfireEnemy, m_flSightDist, FIELD_FLOAT ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszDeathTarget, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_iszKnockoutTarget, FIELD_STRING ),
+	DEFINE_FIELD( CNightfireEnemy, m_flKnockout, FIELD_TIME ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszDeathCamera, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszRescueTarget, FIELD_STRING ),
 	DEFINE_FIELD( CNightfireEnemy, m_iszCameraTarget, FIELD_STRING ),
@@ -392,6 +398,11 @@ void CNightfireEnemy::KeyValue( KeyValueData *pkvd )
 	else if( FStrEq( pkvd->szKeyName, "deathtarget" ))
 	{
 		m_iszDeathTarget = ALLOC_STRING( pkvd->szValue );
+		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "knockouttarget" ))
+	{
+		m_iszKnockoutTarget = ALLOC_STRING( pkvd->szValue );
 		pkvd->fHandled = TRUE;
 	}
 	else if( FStrEq( pkvd->szKeyName, "cameratarget" ))
@@ -518,16 +529,21 @@ BOOL NF_IsTriggerMaskCharacter( CBaseEntity *entity )
 }
 
 // Retail TriggerCondition bitmask (bit = 1 << (HL enum - 1), docs/retail/mission1.md).
-// No knockout provider exists yet, so 0x1000 never fires and 0x8/0x800 see knockout == 0.
+// Knockout (retail +0x380, set in CNightfireEnemy::Killed, docs/retail/ai-trigger.md): 0x1000 fires for a knocked-out
+// character, 0x8 and the 0x800 group death only for a plain death.
 // Order and the 0x800 group-death quirk follow retail 0x42036360 (Ghidra-verified [offline]).
-// The retail death/knockout target strings at +0x2E8/+0x2EC are not handled here.
+// The death/knockout target strings (+0x2E8/+0x2EC) fire in Killed.
 BOOL NF_CheckCharacterAITrigger( CBaseMonster *monster )
 {
+	CNightfireEnemy *character = (CNightfireEnemy *)monster;
+	character->KnockoutWake();
+
 	int &mask = monster->m_iTriggerCondition;
 	if( !mask ) return FALSE;
 
 	BOOL fire = FALSE;
-	const BOOL dead = monster->pev->deadflag != DEAD_NO;
+	const BOOL knockedOut = character->m_flKnockout > 0;
+	const BOOL dead = monster->pev->deadflag != DEAD_NO && !knockedOut;
 
 	if(( mask & 0x1 ) && monster->m_hEnemy != 0 && monster->m_hEnemy->IsPlayer() && monster->HasConditions( bits_COND_SEE_ENEMY ))
 	{ mask &= ~0x1; fire = TRUE; }
@@ -571,6 +587,9 @@ BOOL NF_CheckCharacterAITrigger( CBaseMonster *monster )
 		if(( mask & 0x100 ) && ( monster->m_afSoundTypes & bits_SOUND_COMBAT ))
 		{ mask &= ~0x100; fire = TRUE; }
 	}
+
+	if(( mask & 0x1000 ) && monster->pev->deadflag != DEAD_NO && knockedOut )
+	{ mask &= ~0x1000; fire = TRUE; }
 
 	if( fire )
 	{
@@ -712,6 +731,7 @@ void CNightfireEnemy::Precache( void )
 			PRECACHE_SOUND( w->reload );
 	}
 
+	PRECACHE_SOUND( "misc/snoring.wav" );
 	m_cPain = CountVoice( "pain" );
 	m_cDie = CountVoice( "die" );
 	m_cCombat = CountVoice( "combat" );
@@ -1170,6 +1190,17 @@ int CNightfireEnemy::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker
 	return ret;
 }
 
+// retail DeadCharacterThink 0x42038C80: when the time is up the snoring plays
+// once more and the knockout ends, so the character counts as dead afterwards
+void CNightfireEnemy::KnockoutWake( void )
+{
+	if( m_flKnockout > 0 && m_flKnockout < gpGlobals->time )
+	{
+		EMIT_SOUND_DYN( edict(), CHAN_BODY, "misc/snoring.wav", 1.0, ATTN_IDLE, 0, 100 );
+		m_flKnockout = 0;
+	}
+}
+
 void CNightfireEnemy::NFCountEnemy( CBaseEntity *pPlayer )
 {
 	if( m_fNFCounted )
@@ -1235,8 +1266,28 @@ void CNightfireEnemy::Killed( entvars_t *pevAttacker, int iGib )
 
 	// a blast on the corpse calls Killed again (CBaseMonster::DeadTakeDamage,
 	// GIB_ALWAYS): fire the death target only on the first death
-	if( !FStringNull( m_iszDeathTarget ) && !HasMemory( bits_MEMORY_KILLED ))
-		FireTargets( STRING( m_iszDeathTarget ), CBaseEntity::Instance( pevAttacker ), this, USE_TOGGLE, 0 );
+	if( !HasMemory( bits_MEMORY_KILLED ))
+	{
+		// retail CBaseCharacter::TakeDamage 0x42043C30: a lethal club / shock /
+		// paralyze hit by a client or monster knocks out for 120 / 180 / 240 s
+		// (the longest matching type wins); the death target then stays
+		// silent and the knockout target fires instead (0x42036360)
+		if( pevAttacker && ( pevAttacker->flags & ( FL_CLIENT | FL_MONSTER )))
+		{
+			if( m_bitsLastDamage & DMG_CLUB ) m_flKnockout = gpGlobals->time + 120.0f;
+			if( m_bitsLastDamage & DMG_SHOCK ) m_flKnockout = gpGlobals->time + 180.0f;
+			if( m_bitsLastDamage & DMG_PARALYZE ) m_flKnockout = gpGlobals->time + 240.0f;
+		}
+		const string_t target = m_flKnockout > 0 ? m_iszKnockoutTarget : m_iszDeathTarget;
+		if( !FStringNull( target ))
+			FireTargets( STRING( target ), CBaseEntity::Instance( pevAttacker ), this, USE_TOGGLE, 0 );
+		if( m_flKnockout > 0 )
+		{
+			EMIT_SOUND_DYN( edict(), CHAN_BODY, "misc/snoring.wav", 1.0, ATTN_IDLE, 0, 100 );
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' knocked out until %.1f\n", STRING( pev->targetname ), m_flKnockout );
+		}
+	}
 
 	CHGrunt::Killed( pevAttacker, iGib );
 	if( deathCamera ) NF_DeathCameraStart( this, pevAttacker, STRING( m_iszDeathCamera ));
