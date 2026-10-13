@@ -1080,6 +1080,10 @@ void CNightfireEnemy::PrescheduleThink( void )
 	if( m_fPeaceful && HasConditions( bits_COND_HEAR_SOUND ) && ( m_afSoundTypes & ( bits_SOUND_COMBAT | bits_SOUND_DANGER )))
 		Provoke();
 
+	// a calm guard does not turn to footsteps or other noise
+	if( m_fPeaceful )
+		ClearConditions( bits_COND_HEAR_SOUND );
+
 	if( HasConditions( bits_COND_NEW_ENEMY ) && gpGlobals->time > m_flNextCombatTalk )
 	{
 		PlayVoice( "combat", m_cCombat, ATTN_NORM );
