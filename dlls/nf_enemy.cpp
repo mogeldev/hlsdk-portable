@@ -216,6 +216,8 @@ public:
 	BOOL ShouldGibMonster( int iGib ) { return FALSE; }	// Nightfire has no gib models
 	Activity GetDeathActivity( void );
 	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType );
+	int IRelationship( CBaseEntity *pTarget );
+	void Provoke( void );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType );
 	void Killed( entvars_t *pevAttacker, int iGib );
 	void UpdateOnRemove( void );
@@ -267,6 +269,7 @@ private:
 	BOOL m_fNFCounted;
 	BOOL m_fNFDispatched;
 	BOOL m_fCorpseSpotted;
+	BOOL m_fPeaceful;	// ignores the player until provoked (m1_austria03 party guards)
 	EHANDLE m_hTaserWeapon;
 	float m_flBlindUntil;
 
@@ -342,6 +345,7 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_fNFCounted, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_fNFDispatched, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_fCorpseSpotted, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CNightfireEnemy, m_fPeaceful, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_hTaserWeapon, FIELD_EHANDLE ),
 	DEFINE_FIELD( CNightfireEnemy, m_flBlindUntil, FIELD_TIME ),
 };
@@ -741,6 +745,9 @@ void CNightfireEnemy::Spawn( void )
 	// EntvarsKeyvalue compares key names case-insensitively
 	m_iNFSpawnflags = pev->spawnflags;
 	pev->spawnflags &= NF_ENEMY_SPAWNFLAGS_HL;
+	// The Austria03 party guards (all carry spawnflag 8) stay calm while the player is not
+	// provoking them. [assumed] The retail meaning of bit 8 is not found; user-specified behaviour.
+	m_fPeaceful = ( m_iNFSpawnflags & 8 ) && FStrEq( STRING( gpGlobals->mapname ), "m1_austria03" );
 
 	pev->solid = SOLID_SLIDEBOX;
 	pev->movetype = MOVETYPE_STEP;
@@ -1069,6 +1076,10 @@ void CNightfireEnemy::PrescheduleThink( void )
 	if( InCover() && m_Activity == ACT_IDLE && pev->sequence != m_iCoverIdleSeq )
 		SetActivity( ACT_IDLE );
 
+	// gunfire or an explosion nearby ends the calm
+	if( m_fPeaceful && HasConditions( bits_COND_HEAR_SOUND ) && ( m_afSoundTypes & ( bits_SOUND_COMBAT | bits_SOUND_DANGER )))
+		Provoke();
+
 	if( HasConditions( bits_COND_NEW_ENEMY ) && gpGlobals->time > m_flNextCombatTalk )
 	{
 		PlayVoice( "combat", m_cCombat, ATTN_NORM );
@@ -1092,8 +1103,30 @@ void CNightfireEnemy::DeathSound( void )
 	PlayVoice( "die", m_cDie, ATTN_IDLE );
 }
 
+int CNightfireEnemy::IRelationship( CBaseEntity *pTarget )
+{
+	if( m_fPeaceful && pTarget && pTarget->IsPlayer())
+		return R_NO;
+	return CHGrunt::IRelationship( pTarget );
+}
+
+// Ends the calm of this guard and of its squad mates (same netname) so the party room turns together.
+void CNightfireEnemy::Provoke( void )
+{
+	if( !m_fPeaceful ) return;
+	m_fPeaceful = FALSE;
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' provoked\n", STRING( pev->targetname ));
+	if( FStringNull( pev->netname )) return;
+	CBaseEntity *other = NULL;
+	while(( other = UTIL_FindEntityByString( other, "netname", STRING( pev->netname ))) != NULL )
+		if( other != this && FClassnameIs( other->pev, "enemy_generic" ))
+			((CNightfireEnemy *)other)->m_fPeaceful = FALSE;
+}
+
 int CNightfireEnemy::TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
 {
+	Provoke();
 	// m_bitsDamageType accumulates over the enemy's life; the death
 	// animation depends on the hit that kills
 	m_bitsLastDamage = bitsDamageType;
