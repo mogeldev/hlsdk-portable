@@ -3,7 +3,7 @@ nf_hud.cpp - James Bond 007: Nightfire (PC) in-game HUD: health iris, ammo
 panel, crosshair and sniper scope
 
 The retail client draws its HUD from plain images (gui/hud/640_*.png, loaded
-by the engine fork as one-frame sprites) at their own pixel size, no scaling
+by the engine fork as one-frame sprites) at their own pixel size (the port scales them by nf_hud_scale)
 (retail client.dll, docs/retail/hud.md "In-game HUD"):
 
 * Health (CHealthHudPanel, ctor 0x41040790, layout 0x410405f0): lower left
@@ -26,9 +26,10 @@ by the engine fork as one-frame sprites) at their own pixel size, no scaling
   ammo circles with the first colour, the iris blades with the third
   (matches retail PC screenshots: dark blue discs, light blue blades). The
   coloured images (clips, rounds, crosshair, Iris_09) are drawn as they are.
-* The three-digit count (CAmmoCountPanel 0x4103b560, 640_hud_numbers.png)
-  belongs to the weapon wheel (created with weapon_wheel / gadget_wheel at
-  0x4103bee3) and is not drawn here.
+* The three-digit count (CAmmoCountPanel 0x4103b560, 640_hud_numbers.png) shows
+  the spare ammo beside the ammo ring (retail screenshots; 258 px from the right
+  edge while the weapon wheel is up). Own-size images are scaled by nf_hud_scale
+  (0 = screen height / 768); full-screen overlays are stretched.
 * Use icon (ctor 0x41040c40, setter 0x41040bf0, layout 0x41040b10; message
   "SetHudIcon", handler 0x41049d00): one byte, 0 hides, 1-5 show
   640_use / _use_level_trans / _use_pda / _use_qworm / _use_watch at their
