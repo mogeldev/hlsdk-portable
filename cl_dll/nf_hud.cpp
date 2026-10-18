@@ -479,8 +479,10 @@ static void NF_DrawAmmo( void )
 	int h = clip ? NF_SpriteH( clip ) : NF_SpriteH( s_hAmmoCircle );
 	int x = ScreenWidth - w, y = ScreenHeight - h;
 
-	// CAmmoImagePanel 0x4103c060: the circle under the clip image, both in the clip image's rectangle
-	NF_DrawQuad( s_hAmmoCircle, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, s_colors[0], 1.0f );
+	// CAmmoImagePanel 0x4103c060: the circle under the clip image. Stretching the circle to a tall clip image drew an
+	// oval, so the circle keeps its own size in the corner.
+	if( s_hAmmoCircle )
+		NF_DrawCorner( s_hAmmoCircle, ScreenWidth - NF_SpriteW( s_hAmmoCircle ), ScreenHeight, s_colors[0] );
 	NF_DrawImage( clip, x, y, w, h, 1.0f );
 
 	if( rounds >= 0 && p->clip > 0 )
