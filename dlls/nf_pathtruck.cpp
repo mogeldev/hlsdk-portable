@@ -267,8 +267,8 @@ void CNFPathTruck::UpdateSound( void )
 	if( !m_bActive ) return;
 	int desired = !m_bStopped && !m_bFinished && gpGlobals->time >= m_flBlockedUntil ? 150 : 50;
 	int oldPitch = m_iPitch;
-	if( m_iPitch < desired ) m_iPitch = min( m_iPitch + 15, desired );
-	else if( m_iPitch > desired ) m_iPitch = max( m_iPitch - 15, desired );
+	if( m_iPitch < desired ) m_iPitch = Q_min( m_iPitch + 15, desired );
+	else if( m_iPitch > desired ) m_iPitch = Q_max( m_iPitch - 15, desired );
 	if( m_bSound && m_iPitch == oldPitch ) return;
 	EMIT_SOUND_DYN( edict(), CHAN_STATIC, "common/truck1.wav", desired == 150 ? 1.0f : 0.4f,
 		0.3f, m_bSound ? SND_CHANGE_PITCH | SND_CHANGE_VOL : 0, m_iPitch );
@@ -289,7 +289,7 @@ void CNFPathTruck::Move( void )
 		{
 			float yawSpeed = pGoal->pev->yaw_speed > 0 ? pGoal->pev->yaw_speed : 5;
 			float yawDelta = UTIL_AngleDistance( pev->ideal_yaw, pev->angles.y );
-			pev->angles.y += max( -yawSpeed * 0.5f, min( yawDelta, yawSpeed * 0.5f ));
+			pev->angles.y += Q_max( -yawSpeed * 0.5f, Q_min( yawDelta, yawSpeed * 0.5f ));
 			m_vecVelocity = m_vecVelocity * 0.8f + delta.Normalize() * (m_flVehicleSpeed * 0.2f);
 			pClip->pev->velocity = m_vecVelocity;
 			pClip->pev->avelocity.y = 10 * UTIL_AngleDistance( pev->angles.y, pClip->pev->angles.y );
@@ -353,7 +353,7 @@ void CNFPathTruck::TerrainPitch( void )
 void CNFPathTruck::TruckThink( void )
 {
 	pev->nextthink = gpGlobals->time + 0.1f;
-	float interval = max( 0.0f, min( gpGlobals->time - m_flThinkTime, 0.2f ));
+	float interval = Q_max( 0.0f, Q_min( gpGlobals->time - m_flThinkTime, 0.2f ));
 	m_flThinkTime = gpGlobals->time;
 	StudioFrameAdvance( interval );
 	if( !LinkClip() )

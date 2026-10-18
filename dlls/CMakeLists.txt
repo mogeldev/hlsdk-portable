@@ -136,6 +136,7 @@ set (SVDLL_SOURCES
 	nf_rain.cpp
 	nf_snow.cpp
 	nf_scoring.cpp
+	nf_pathtruck.cpp
 	nihilanth.cpp
 	nodes.cpp
 	observer.cpp
