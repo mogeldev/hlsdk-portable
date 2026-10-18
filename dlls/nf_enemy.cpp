@@ -16,8 +16,10 @@ Keys (no Nightfire FGD; inferred from the retail maps, assumptions):
   Spawnflags       capitalised (parsed into pev->spawnflags anyway: entvars
                    keys match case-insensitively); the low bits match the
                    HLSDK monster flags (4 hit monsterclip, 32 squad leader,
-                   128 wait for script), the high bits (0x4000, 0x400000,
-                   0x2000000) are unknown and masked off in Spawn
+                   128 wait for script), 0x10000 patrols (idle/alert),
+                   0x100000 holds the position (no patrol, no alarm search),
+                   the other high bits (0x4000, 0x400000, 0x2000000) are
+                   unknown and masked off in Spawn
   deathtarget      fired when the enemy dies
   primary_weapon   weapon id, see g_nfEnemyWeapons (from the retail game.dll:
                    the precache switch of the enemy class, case = id - 1)
@@ -32,11 +34,12 @@ Keys (no Nightfire FGD; inferred from the retail maps, assumptions):
   TriggerTarget / TriggerCondition: parsed by CBaseMonster; the Nightfire
                    condition values (e.g. 4362) are not HLSDK conditions
 
-Patrols (from the retail game.dll, the node picker at 0x4203b390): patrol
-nodes are info_node with nodetype 16 or 32 (what 32 adds is unknown; it does
-not mean running); their skin is the route group. Idle enemies walk the
-route, alerted ones run (the retail "Walk Patrol" / "Run Patrol" schedules
-are chosen by the enemy's state). The enemy walks to the nearest (by route length) patrol node of
+Patrols (from the retail game.dll, the node picker at 0x4203b3c0): patrol
+nodes are info_node with nodetype 16 or 32 (32 also turns the walker to the
+node's angles yaw on arrival; neither means running); their skin is the route
+group. Only enemies with spawnflag 0x10000 patrol, never with 0x100000; idle
+and alerted ones walk (retail "Walk Patrol" 43; "Run Patrol" 44 is for
+hunting / damaged enemies [not ported]). The enemy walks to the nearest (by route length) patrol node of
 the group of the node it stands on, skipping the node it is on, the previous
 one and the last 10 visited, within the patrol distances.
 
@@ -241,6 +244,8 @@ public:
 	Schedule_t *GetScheduleOfType( int Type );
 	void StartTask( Task_t *pTask );
 	void RunTask( Task_t *pTask );
+	BOOL InThrowBack( void );
+	CBaseEntity *ThrowGrenade( void ) { return m_hThrowGrenade; }
 
 	CUSTOM_SCHEDULES
 
@@ -256,6 +261,7 @@ private:
 	int CountVoice( const char *kind );
 	BOOL StartPatrolMove( void );
 	BOOL InPatrolHistory( int node );
+	int PatrolFaceNode( void );
 public:
 	CAIEvent *FindClosestAIEvent( int iType, BOOL fSkipLOS, BOOL fNeedFacing );
 	BOOL ActivateAIEvent( CAIEvent *pEvent );
@@ -275,6 +281,11 @@ private:
 	BOOL m_fPeaceful;	// ignores the player until provoked (m1_austria03 party guards)
 	EHANDLE m_hTaserWeapon;
 	float m_flBlindUntil;
+	EHANDLE m_hThrowGrenade;	// retail +0x948: the grenade being thrown back / kicked away
+	float m_flNextGrenadeTalk;	// retail +0x904
+	int m_cGrenadeVoice;
+	BOOL ClaimGrenade( void );
+	void GrenadeVoice( void );
 
 	float m_flSightDist;
 	string_t m_iszDeathTarget;
@@ -296,6 +307,8 @@ private:
 	int m_iPatrolNodes[NF_PATROL_HISTORY];	// visited, ring buffer, -1 = empty
 	int m_iPatrolIdx;
 	int m_iPatrolTarget;
+	int m_iPatrolRetries;	// retail m_nPatrolRetrys (+0x344): the same target picked again
+	int m_iPatrolLast;	// retail +0x348: the previous target
 	float m_flNextPatrolTime;
 	int m_bitsLastDamage;	// damage type of the latest hit (death animation)
 
@@ -335,6 +348,8 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_ARRAY( CNightfireEnemy, m_iPatrolNodes, FIELD_INTEGER, NF_PATROL_HISTORY ),
 	DEFINE_FIELD( CNightfireEnemy, m_iPatrolIdx, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_iPatrolTarget, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_iPatrolRetries, FIELD_INTEGER ),
+	DEFINE_FIELD( CNightfireEnemy, m_iPatrolLast, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_flNextPatrolTime, FIELD_TIME ),
 	DEFINE_FIELD( CNightfireEnemy, m_bitsLastDamage, FIELD_INTEGER ),
 	DEFINE_FIELD( CNightfireEnemy, m_iNFSpawnflags, FIELD_INTEGER ),
@@ -354,6 +369,8 @@ TYPEDESCRIPTION CNightfireEnemy::m_SaveData[] =
 	DEFINE_FIELD( CNightfireEnemy, m_fPeaceful, FIELD_BOOLEAN ),
 	DEFINE_FIELD( CNightfireEnemy, m_hTaserWeapon, FIELD_EHANDLE ),
 	DEFINE_FIELD( CNightfireEnemy, m_flBlindUntil, FIELD_TIME ),
+	DEFINE_FIELD( CNightfireEnemy, m_hThrowGrenade, FIELD_EHANDLE ),
+	DEFINE_FIELD( CNightfireEnemy, m_flNextGrenadeTalk, FIELD_TIME ),
 };
 
 IMPLEMENT_SAVERESTORE( CNightfireEnemy, CHGrunt )
@@ -735,6 +752,7 @@ void CNightfireEnemy::Precache( void )
 	m_cPain = CountVoice( "pain" );
 	m_cDie = CountVoice( "die" );
 	m_cCombat = CountVoice( "combat" );
+	m_cGrenadeVoice = CountVoice( "grenade" );
 
 	m_iBrassShell = PRECACHE_MODEL( "models/shell.mdl" );
 	if( m_cGrenades > 0 )
@@ -806,6 +824,8 @@ void CNightfireEnemy::Spawn( void )
 		m_iPatrolNodes[i] = -1;
 	m_iPatrolIdx = 0;
 	m_iPatrolTarget = -1;
+	m_iPatrolRetries = 0;
+	m_iPatrolLast = -1;
 	if( m_flMaxPatrolPath <= 0 )
 		m_flMaxPatrolPath = 2048;	// [assumed] the value on most retail enemies
 
@@ -851,6 +871,34 @@ BOOL CNightfireEnemy::CheckRangeAttack1( float flDot, float flDist )
 #define NF_ACT_FLINCH_RIGHTLEG	77
 
 extern Schedule_t slNFPhotoPose[];
+extern Schedule_t slNFThrowBack[];
+
+// retail 0x4206e710 (kick, keeps the position) / 0x4206e820 (throw from the
+// hand): the grenade flies again with the thrower as owner and keeps its fuse
+static void NF_RethrowGrenade( CBaseEntity *entity, entvars_t *pevThrower, const Vector &vecStart, const Vector &vecVelocity, float flDelay )
+{
+	CGrenade *pGrenade = (CGrenade *)entity;
+	entvars_t *pevG = pGrenade->pev;
+
+	pevG->velocity = vecVelocity;
+	UTIL_SetOrigin( pevG, vecStart );
+	pevG->flags &= ~FL_ONGROUND;
+	pevG->effects &= ~EF_NODRAW;
+	pevG->movetype = MOVETYPE_BOUNCE;
+	pevG->solid = SOLID_BBOX;
+	pevG->owner = ENT( pevThrower );
+	pevG->dmgtime = gpGlobals->time + flDelay;
+	pGrenade->SetTouch( &CGrenade::BounceTouch );
+	pGrenade->SetThink( &CGrenade::TumbleThink );
+	pevG->nextthink = gpGlobals->time + 0.1f;
+	pevG->sequence = RANDOM_LONG( 3, 6 );
+	pevG->frame = 0;
+	pevG->framerate = 1.0f;
+	pGrenade->ResetSequenceInfo();
+	if( NF_DEBUG( NF_DBG_MONSTERS ))
+		ALERT( at_console, "nf_debug: enemy '%s' returns %s at %.0f %.0f %.0f velocity %.0f %.0f %.0f fuse %.2f\n", STRING( pevThrower->targetname ),
+			STRING( pevG->classname ), vecStart.x, vecStart.y, vecStart.z, vecVelocity.x, vecVelocity.y, vecVelocity.z, flDelay );
+}
 
 void CNightfireEnemy::PhotoPose( BOOL enabled )
 {
@@ -1039,6 +1087,18 @@ void CNightfireEnemy::HandleAnimEvent( MonsterEvent_t *pEvent )
 	case HGRUNT_AE_GREN_TOSS:
 	{
 		UTIL_MakeVectors( pev->angles );
+
+		// retail 0x420620e6: with a grenade in hand (throwback_grenade) the
+		// toss event throws that one from the gun position
+		if( InThrowBack() && m_hThrowGrenade != 0 )
+		{
+			NF_RethrowGrenade( m_hThrowGrenade, pev, GetGunPosition(), gpGlobals->v_forward * 500 + Vector( 0, 0, 150 ), pev->dmgtime - gpGlobals->time );
+			m_hThrowGrenade = NULL;
+			if( m_cGrenades > 0 && --m_cGrenades <= 0 )
+				pev->weapons &= ~HGRUNT_HANDGRENADE;
+			break;
+		}
+
 		CGrenade *pGrenade = CGrenade::ShootTimed( pev, GetGunPosition(), m_vecTossVelocity, 3.5 );
 		if( pGrenade )
 		{
@@ -1079,9 +1139,17 @@ void CNightfireEnemy::HandleAnimEvent( MonsterEvent_t *pEvent )
 		}
 		break;
 	}
-	case 13:	// throw a grenade back
-	case 14:	// kick a grenade away
-		// [not yet] grenade throw-back / kick
+	case 13:	// throw a grenade back: pick it up (retail 0x420629a0 hides it, EF_NODRAW)
+		if( InThrowBack() && m_hThrowGrenade != 0 )
+			m_hThrowGrenade->pev->effects |= EF_NODRAW;
+		break;
+	case 14:	// kick a grenade away (retail 0x420628d4)
+		if( InThrowBack() && m_hThrowGrenade != 0 )
+		{
+			UTIL_MakeVectors( pev->angles );
+			NF_RethrowGrenade( m_hThrowGrenade, pev, m_hThrowGrenade->pev->origin + Vector( 0, 0, 1 ), gpGlobals->v_forward * 500 + Vector( 0, 0, 150 ), pev->dmgtime - gpGlobals->time );
+			m_hThrowGrenade = NULL;
+		}
 		break;
 	default:
 		CSquadMonster::HandleAnimEvent( pEvent );
@@ -1419,6 +1487,107 @@ Schedule_t slNFBlind[] = { { tlNFBlind, ARRAYSIZE( tlNFBlind ), 0, 0, "NFBlind" 
 Task_t tlNFPhotoPose[] = { { TASK_STOP_MOVING, 0 }, { TASK_NF_PHOTO_POSE, 0 } };
 Schedule_t slNFPhotoPose[] = { { tlNFPhotoPose, ARRAYSIZE( tlNFPhotoPose ), 0, 0, "NFPhotoPose" } };
 
+// Retail schedule 84 "GenericEnemyThrowBack" (GetScheduleOfType 0x4205ecca,
+// tasks 62, 87, 126, 18, 92, 127, 128, 88): a DANGER sound heard in any state
+// (GetSchedule 0x4206356f) sends the enemy to a live grenade within 192 units to
+// throw it back or kick it away; without one it takes cover (schedule 83).
+enum
+{
+	SCHED_NF_THROWBACK = LAST_COMMON_SCHEDULE + 200,
+};
+enum
+{
+	TASK_NF_FIND_GRENADE = LAST_COMMON_TASK + 200,	// retail 126
+	TASK_NF_FACE_GRENADE,				// retail 127
+	TASK_NF_THROWBACK,				// retail 128
+};
+#define NF_THROWBACK_RANGE	192.0f	// retail 0x42067463: grenades looked at
+#define NF_THROWBACK_REACH	48.0f	// retail 0x4206768f: close enough to use it
+#define NF_THROWBACK_FUSE	1.0f	// retail 0x420631c6: throw back with at least this much fuse left, else kick
+
+Task_t tlNFThrowBack[] =
+{
+	{ TASK_SET_FAIL_SCHEDULE, (float)SCHED_TAKE_COVER_FROM_BEST_SOUND },
+	{ TASK_STOP_MOVING, 0 },
+	{ TASK_NF_FIND_GRENADE, 0 },
+	{ TASK_RUN_PATH, 0 },
+	{ TASK_WAIT_FOR_MOVEMENT, 0 },
+	{ TASK_NF_FACE_GRENADE, 0 },
+	{ TASK_NF_THROWBACK, 0 },
+	{ TASK_TURN_LEFT, (float)179 },
+};
+Schedule_t slNFThrowBack[] = { { tlNFThrowBack, ARRAYSIZE( tlNFThrowBack ), 0, 0, "NFThrowBack" } };
+
+BOOL CNightfireEnemy::InThrowBack( void )
+{
+	return m_pSchedule == slNFThrowBack;
+}
+
+// a grenade another enemy is on its way to (retail grenade flag +0x849)
+static BOOL NF_GrenadeClaimed( CBaseEntity *grenade, CNightfireEnemy *self )
+{
+	CBaseEntity *pEnt = NULL;
+	while(( pEnt = UTIL_FindEntityByClassname( pEnt, "enemy_generic" )) != NULL )
+	{
+		CNightfireEnemy *other = (CNightfireEnemy *)pEnt;
+		if( other != self && other->IsAlive() && other->InThrowBack() && other->ThrowGrenade() == grenade )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+// retail task 126 (0x42067463): the first unclaimed live grenade within 192
+// units that is at hand (48) or reachable by a route; the enemy remembers the
+// grenade's fuse. Flash grenades: retail changes to schedule 23 [not implemented].
+BOOL CNightfireEnemy::ClaimGrenade( void )
+{
+	static const char *const classes[] = { "frag_grenade", "grenade" };
+
+	m_hThrowGrenade = NULL;
+	for( int i = 0; i < ARRAYSIZE( classes ); i++ )
+	{
+		CBaseEntity *pEnt = NULL;
+		while(( pEnt = UTIL_FindEntityByClassname( pEnt, classes[i] )) != NULL )
+		{
+			// "grenade" is also the HL class of satchels and contact grenades: those have no fuse
+			if( pEnt->pev->dmgtime <= gpGlobals->time || pEnt->pev->movetype != MOVETYPE_BOUNCE || NF_GrenadeClaimed( pEnt, this ))
+				continue;
+
+			float flDist = ( pEnt->pev->origin - pev->origin ).Length();
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' considers %s at %.0f %.0f %.0f (%.0f away)\n", STRING( pev->targetname ),
+					STRING( pEnt->pev->classname ), pEnt->pev->origin.x, pEnt->pev->origin.y, pEnt->pev->origin.z, flDist );
+			if( flDist >= NF_THROWBACK_RANGE )
+				continue;
+			if( flDist >= NF_THROWBACK_REACH && !MoveToLocation( ACT_RUN, 2, pEnt->pev->origin ))
+				continue;
+
+			m_hThrowGrenade = pEnt;
+			pev->dmgtime = pEnt->pev->dmgtime;
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' goes for %s %d (%.0f away, fuse %.2f)\n", STRING( pev->targetname ),
+					STRING( pEnt->pev->classname ), pEnt->entindex(), flDist, pEnt->pev->dmgtime - gpGlobals->time );
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+// retail GetSchedule 0x4206356f: the grenade voice (0x4205e300, cooldown +0x904) and the combat voice
+void CNightfireEnemy::GrenadeVoice( void )
+{
+	if( gpGlobals->time > m_flNextGrenadeTalk )
+	{
+		PlayVoice( "grenade", m_cGrenadeVoice, ATTN_NORM );
+		m_flNextGrenadeTalk = gpGlobals->time + 1;
+	}
+	if( gpGlobals->time > m_flNextCombatTalk )
+	{
+		PlayVoice( "combat", m_cCombat, ATTN_NORM );
+		m_flNextCombatTalk = gpGlobals->time + RANDOM_FLOAT( 6, 10 );
+	}
+}
+
 void CNightfireEnemy::Blind( float duration )
 {
 	if( !IsAlive() || duration <= 0 || m_MonsterState == MONSTERSTATE_SCRIPT ) return;
@@ -1502,6 +1671,7 @@ DEFINE_CUSTOM_SCHEDULES( CNightfireEnemy )
 	slNFTaser,
 	slNFBlind,
 	slNFPhotoPose,
+	slNFThrowBack,
 };
 
 IMPLEMENT_CUSTOM_SCHEDULES( CNightfireEnemy, CHGrunt )
@@ -1514,6 +1684,18 @@ BOOL CNightfireEnemy::InPatrolHistory( int node )
 			return TRUE;
 	}
 	return FALSE;
+}
+
+// The patrol target when it is a type 32 node the enemy has reached (retail
+// task 114 tests bit 0x20 of the node flags), else -1.
+int CNightfireEnemy::PatrolFaceNode( void )
+{
+	if( m_iPatrolTarget < 0 || !WorldGraph.m_fGraphPresent || m_iPatrolTarget >= WorldGraph.m_cNodes )
+		return -1;
+	const CNode &node = WorldGraph.m_pNodes[m_iPatrolTarget];
+	if( !( node.m_afNFNodeType & NF_NODE_PATROL_B ) || ( node.m_vecOrigin - pev->origin ).Length2D() > 64 )
+		return -1;
+	return m_iPatrolTarget;
 }
 
 // Pick the next patrol node and start moving there (retail: the node picker
@@ -1546,11 +1728,21 @@ BOOL CNightfireEnemy::StartPatrolMove( void )
 	float candLen[NF_PATROL_MAX_CAND];
 	int nCand = 0;
 
+	// retail: the previous target, when the enemy is not standing on it, is
+	// kept out of the search but seeded as the last-resort candidate
+	const BOOL fSeedPrev = iPrev >= 0 && iPrev != iCur && m_iPatrolRetries < 2;
+	if( fSeedPrev )
+	{
+		cand[0] = iPrev;
+		candLen[0] = m_flMaxPatrolPath;
+		nCand = 1;
+	}
+
 	for( int i = 0; i < WorldGraph.m_cNodes; i++ )
 	{
 		const CNode &node = WorldGraph.m_pNodes[i];
 
-		if( i == iCur || i == iPrev || !( node.m_afNFNodeType & NF_NODE_PATROL ) || InPatrolHistory( i ))
+		if( i == iCur || ( fSeedPrev && i == iPrev ) || !( node.m_afNFNodeType & NF_NODE_PATROL ) || InPatrolHistory( i ))
 			continue;
 		if( iGroup > 0 && node.m_iNFGroup > 0 && node.m_iNFGroup != iGroup )
 			continue;
@@ -1594,20 +1786,30 @@ BOOL CNightfireEnemy::StartPatrolMove( void )
 	{
 		const CNode &node = WorldGraph.m_pNodes[cand[c]];
 
-		// the retail AI picks "Walk Patrol" or "Run Patrol" by the enemy's
-		// state, not by the node type: run only when alerted
-		Activity act = m_MonsterState == MONSTERSTATE_ALERT ? ACT_RUN : ACT_WALK;
+		// retail: after more than two repeats the previous target is skipped
+		if( m_iPatrolRetries > 2 && cand[c] == m_iPatrolLast )
+			continue;
 
-		if( !MoveToLocation( act, 2, node.m_vecOrigin ))
+		// the retail "Patrol" schedules 43/45 walk; GetSchedule chooses 44
+		// (run) only for hunting / damaged enemies [not ported]
+		if( !MoveToLocation( ACT_WALK, 2, node.m_vecOrigin ))
 			continue;
 
 		m_iPatrolTarget = cand[c];
-		// remember the patrol node we are leaving
+		// retail: the node we are leaving (if a patrol node), then the target
 		if(( WorldGraph.m_pNodes[iCur].m_afNFNodeType & NF_NODE_PATROL ) && !InPatrolHistory( iCur ))
 		{
 			m_iPatrolNodes[m_iPatrolIdx] = iCur;
 			m_iPatrolIdx = ( m_iPatrolIdx + 1 ) % NF_PATROL_HISTORY;
 		}
+		m_iPatrolNodes[m_iPatrolIdx] = cand[c];
+		m_iPatrolIdx = ( m_iPatrolIdx + 1 ) % NF_PATROL_HISTORY;
+		m_iPatrolRetries = cand[c] == m_iPatrolLast ? m_iPatrolRetries + 1 : 0;
+		m_iPatrolLast = cand[c];
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' patrol from %.0f %.0f %.0f to node %d type %d group %d at %.0f %.0f %.0f route %.0f retries %d\n",
+				STRING( pev->targetname ), pev->origin.x, pev->origin.y, pev->origin.z, cand[c], node.m_afNFNodeType, node.m_iNFGroup,
+				node.m_vecOrigin.x, node.m_vecOrigin.y, node.m_vecOrigin.z, candLen[c], m_iPatrolRetries );
 		return TRUE;
 	}
 
@@ -1907,6 +2109,21 @@ Schedule_t *CNightfireEnemy::GetSchedule( void )
 		ReleaseAIEvent( TRUE );
 	}
 
+	// retail GetSchedule 0x4206356f, any state: a DANGER sound (a live grenade)
+	// is answered with the grenade and combat voices and "ThrowBack"
+	if( IsAlive() && HasConditions( bits_COND_HEAR_SOUND ))
+	{
+		CSound *pSound = PBestSound();
+		if( pSound && ( pSound->m_iType & bits_SOUND_DANGER ))
+		{
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' (state %d) hears a danger sound at %.0f %.0f %.0f\n", STRING( pev->targetname ),
+					m_MonsterState, pSound->m_vecOrigin.x, pSound->m_vecOrigin.y, pSound->m_vecOrigin.z );
+			GrenadeVoice();
+			return slNFThrowBack;
+		}
+	}
+
 	// retail GetSchedule 0x420634B0: alerted by a sound, or a new enemy in
 	// combat: run to the nearest alarm (cover events: [not yet])
 	if( IsAlive() && m_hAIEvent == 0 && !m_fAIEventSkip &&
@@ -1930,7 +2147,10 @@ Schedule_t *CNightfireEnemy::GetSchedule( void )
 		}
 	}
 
+	// retail GetSchedule 0x420634E0: idle and alert enemies take "Walk Patrol"
+	// only with spawnflag 0x10000; 0x100000 holds the position (idle stand)
 	if(( m_MonsterState == MONSTERSTATE_IDLE || m_MonsterState == MONSTERSTATE_ALERT ) &&
+		( m_iNFSpawnflags & 0x10000 ) && !( m_iNFSpawnflags & 0x100000 ) &&
 		m_flMaxPatrolDist > 0 && gpGlobals->time >= m_flNextPatrolTime &&
 		!HasConditions( bits_COND_NEW_ENEMY | bits_COND_SEE_ENEMY | bits_COND_SEE_FEAR |
 			bits_COND_LIGHT_DAMAGE | bits_COND_HEAVY_DAMAGE | bits_COND_PROVOKED |
@@ -1949,6 +2169,8 @@ Schedule_t *CNightfireEnemy::GetScheduleOfType( int Type )
 		return slNFPatrol;
 	if( Type == SCHED_NF_AIEVENT_PLAY )
 		return slNFAIEventPlay;
+	if( Type == SCHED_NF_THROWBACK )
+		return slNFThrowBack;
 
 	// a cover schedule failed (e.g. no line of fire): leave cover
 	if( Type == SCHED_FAIL && InCover())
@@ -1992,6 +2214,50 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 		SetActivity( ACT_IDLE );
 		break;
 	}
+	case TASK_NF_FIND_GRENADE:
+		if( ClaimGrenade())
+			TaskComplete();
+		else
+			TaskFail();
+		break;
+	case TASK_NF_FACE_GRENADE:
+		if( m_hThrowGrenade == 0 )
+		{
+			TaskFail();
+			break;
+		}
+		MakeIdealYaw( m_hThrowGrenade->pev->origin );
+		SetTurnActivity();
+		break;
+	case TASK_NF_THROWBACK:
+	{
+		// retail task 128 (0x4206768f) plays activity 61, which picks the
+		// sequence at 0x4206319b: throwback_grenade with 1 s of fuse left or
+		// more, else kick_grenade
+		if( m_hThrowGrenade == 0 || ( m_hThrowGrenade->pev->origin - pev->origin ).Length() >= NF_THROWBACK_REACH )
+		{
+			TaskFail();
+			break;
+		}
+		const BOOL fThrow = m_hThrowGrenade->pev->dmgtime - gpGlobals->time >= NF_THROWBACK_FUSE;
+		int sequence = LookupSequence( fThrow ? "throwback_grenade" : "kick_grenade" );
+		if( sequence <= ACTIVITY_NOT_AVAILABLE )
+			sequence = LookupSequence( fThrow ? "kick_grenade" : "throwback_grenade" );
+		if( sequence <= ACTIVITY_NOT_AVAILABLE )
+		{
+			TaskFail();
+			break;
+		}
+		pev->velocity = g_vecZero;
+		pev->sequence = sequence;
+		pev->frame = 0;
+		ResetSequenceInfo();
+		SetYawSpeed();
+		if( NF_DEBUG( NF_DBG_MONSTERS ))
+			ALERT( at_console, "nf_debug: enemy '%s' plays %s (fuse %.2f)\n", STRING( pev->targetname ),
+				fThrow ? "throwback_grenade" : "kick_grenade", m_hThrowGrenade->pev->dmgtime - gpGlobals->time );
+		break;
+	}
 	case TASK_NF_TASER:
 		m_IdealActivity = ACT_BIG_FLINCH;
 		SetActivity( ACT_BIG_FLINCH );
@@ -2018,6 +2284,16 @@ void CNightfireEnemy::StartTask( Task_t *pTask )
 		TaskComplete();
 		break;
 	case TASK_NF_PATROL_WAIT:
+		// retail task 114 (Walk Patrol only): a node of type 32 turns the
+		// enemy to the node's yaw once the walk is done
+		if( PatrolFaceNode() >= 0 )
+		{
+			pev->ideal_yaw = WorldGraph.m_pNodes[m_iPatrolTarget].m_flHintYaw;
+			if( NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' arrived at patrol node %d (type %d), faces %.0f, waits %.1f\n",
+					STRING( pev->targetname ), m_iPatrolTarget, WorldGraph.m_pNodes[m_iPatrolTarget].m_afNFNodeType,
+					pev->ideal_yaw, m_flWaitPatrolTime );
+		}
 		if( m_flWaitPatrolTime <= 0 )
 		{
 			TaskComplete();
@@ -2127,6 +2403,27 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 		if( !m_fPhotoPose ) TaskComplete();
 		break;
 	}
+	case TASK_NF_FACE_GRENADE:
+		// retail RunTask 127 (0x42062b8c)
+		if( m_hThrowGrenade == 0 )
+		{
+			TaskFail();
+			break;
+		}
+		MakeIdealYaw( m_hThrowGrenade->pev->origin );
+		ChangeYaw( pev->yaw_speed );
+		if( FacingIdeal())
+			TaskComplete();
+		break;
+	case TASK_NF_THROWBACK:
+		// retail RunTask 128: wait for the sequence
+		pev->velocity = g_vecZero;
+		if( m_fSequenceFinished )
+		{
+			m_hThrowGrenade = NULL;
+			TaskComplete();
+		}
+		break;
 	case TASK_NF_TASER:
 		if( m_hTaserWeapon == 0 )
 		{
@@ -2137,8 +2434,15 @@ void CNightfireEnemy::RunTask( Task_t *pTask )
 			pev->velocity = g_vecZero;
 		break;
 	case TASK_NF_PATROL_WAIT:
+		if( PatrolFaceNode() >= 0 )
+			ChangeYaw( pev->yaw_speed );	// turn while waiting [assumed: retail ChangeYaw in idle]
 		if( gpGlobals->time >= m_flWaitFinished )
+		{
+			if( PatrolFaceNode() >= 0 && NF_DEBUG( NF_DBG_MONSTERS ))
+				ALERT( at_console, "nf_debug: enemy '%s' leaves patrol node %d facing %.0f (ideal %.0f)\n",
+					STRING( pev->targetname ), m_iPatrolTarget, pev->angles.y, pev->ideal_yaw );
 			TaskComplete();
+		}
 		break;
 	case TASK_NF_COVER_STAND:
 		if( gpGlobals->time >= m_flWaitFinished )

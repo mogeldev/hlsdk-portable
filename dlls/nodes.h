@@ -67,7 +67,7 @@ public:
 };
 
 #define NF_NODE_PATROL_A	16	// Nightfire nodetype bits of patrol nodes (the retail
-#define NF_NODE_PATROL_B	32	// node picker accepts either; what 32 adds is unknown)
+#define NF_NODE_PATROL_B	32	// node picker accepts either; 32 also turns the enemy to the node's yaw)
 #define NF_NODE_PATROL		( NF_NODE_PATROL_A | NF_NODE_PATROL_B )
 
 //=========================================================
