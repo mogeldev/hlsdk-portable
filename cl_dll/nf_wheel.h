@@ -14,5 +14,6 @@ void NF_WheelCycle( int direction );
 void NF_WheelMode( int mode );
 void NF_WheelActive( int id );
 void NF_WheelDraw( float time, int intermission );
+bool NF_WheelVisible( void );	// the ring is on screen (the ammo count moves left of it)
 
 #endif // NF_WHEEL_H

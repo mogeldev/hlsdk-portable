@@ -51,6 +51,7 @@ keeps the last 4 lines (retail ring, 0x41041f60).
 #include "nf_debug.h"
 #include "nf_hudmsg.h"
 #include "nf_hud.h"
+#include "nf_vision.h"
 
 #define NF_MSG_LINES		12
 #define NF_MSG_LINELEN		256
@@ -536,6 +537,8 @@ void NF_HudMsgDraw( float flTime )
 			if( bottom > NF_HealthPanelTop() - YRES( 4 ))
 				bottom = NF_HealthPanelTop() - YRES( 4 );
 			int x = ScreenHeight / 30, y = bottom - h;
+			if( NF_VisionCameraActive() )
+				y = YRES( 4 );	// the lighter camera frame covers the usual place; keep the box at the top edge
 			NF_DrawImage( s_hBoxBg, x, y, w, h, 1.0f );
 
 			int lines = s_timed.numLines;

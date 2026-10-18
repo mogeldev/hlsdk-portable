@@ -11,9 +11,11 @@ void NF_HudDraw( float flTime );	// CHud::Redraw
 bool NF_HudActive( void );		// the retail images were found
 bool NF_HudScopeActive( void );	// existing L96 zoom with a drawable scope overlay
 void NF_HudFlash( void );		// hint: flash the health iris with beeps
+float NF_HudScaleFactor( void );	// size factor of the own-size HUD images (nf_hud_scale)
 
 // draw an image sprite (engine fork: image files as one-frame sprites) as a TriAPI quad
 void NF_DrawImage( HSPRITE hspr, int x, int y, int w, int h, float alpha );
+void NF_DrawImageColor( HSPRITE hspr, int x, int y, int w, int h, int colorIndex, float alpha );	// tinted with gui/hud/colors.txt line colorIndex
 void NF_DrawImagePart( HSPRITE hspr, int x, int y, int w, int h, float s0, float t0, float s1, float t1, float alpha );
 
 #endif // NF_HUD_H

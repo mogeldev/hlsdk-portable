@@ -21,6 +21,7 @@ void NF_VisionInit( void )
 	gEngfuncs.pfnAddCommand( "uvvision", Toggle ); gEngfuncs.pfnAddCommand( "ActivateGlasses", Toggle );
 	gEngfuncs.pfnAddCommand( "modeswitch", Mode ); gEngfuncs.pfnAddCommand( "GlassesMode", Mode );
 }
+int NF_VisionCameraActive( void ) { return s_camera != 0; }
 void NF_VisionReset( void ) { s_mode = s_camera = 0; s_flash = 0; for( int i = 0; i < 3; i++ ) s_vision[i] = 0; s_view = s_focus = 0; }
 void NF_VisionEntity( cl_entity_t *entity )
 {
@@ -50,10 +51,15 @@ void NF_VisionDraw( float time )
 	}
 	if( s_camera )
 	{
-		if( !s_view ) s_view = SPR_Load( "gui/hud/640_camera_overlay.PNG" );
-		if( !s_focus ) s_focus = SPR_Load( "gui/hud/640_camera_focus_overlay.PNG" );
+		// retail overlay panel 0x4103e730: the frame fills the viewport, the focus image keeps its own size, centred
+		if( !s_view ) s_view = SPR_Load( "gui/hud/1024_camera_overlay.PNG" );
+		if( !s_focus ) s_focus = SPR_Load( "gui/hud/1024_camera_focus_overlay.PNG" );
 		NF_DrawImage( s_view, 0, 0, ScreenWidth, ScreenHeight, 1 );
-		if( s_camera == 2 ) NF_DrawImage( s_focus, 0, 0, ScreenWidth, ScreenHeight, 1 );
+		if( s_camera == 2 )
+		{
+			int w = SPR_Width( s_focus, 0 ), h = SPR_Height( s_focus, 0 );
+			NF_DrawImage( s_focus, ( ScreenWidth - w ) / 2, ( ScreenHeight - h ) / 2, w, h, 1 );
+		}
 	}
 	if( time < s_flash ) gEngfuncs.pfnFillRGBA( 0, 0, ScreenWidth, ScreenHeight, 255, 255, 255, 180 );
 }

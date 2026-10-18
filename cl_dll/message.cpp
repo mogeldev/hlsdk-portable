@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "parsemsg.h"
+#include "nf_vision.h"
 
 DECLARE_MESSAGE( m_Message, HudText )
 DECLARE_MESSAGE( m_Message, GameTitle )
@@ -115,7 +116,9 @@ int CHudMessage::YPosition( float y, int height )
 {
 	int yPos;
 
-	if( y == -1 )	// Centered?
+	if( y == -1 && NF_VisionCameraActive() )	// centred text would sit in the lighter camera's focus ring
+		yPos = ScreenHeight * 0.78f;
+	else if( y == -1 )	// Centered?
 		yPos = ( ScreenHeight - height ) * 0.5f;
 	else
 	{

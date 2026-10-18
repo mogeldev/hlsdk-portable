@@ -62,6 +62,7 @@ Without the images the port's text panels (hud_redraw.cpp) stay.
 #include "triangleapi.h"
 #include "parsemsg.h"
 #include "nf_hud.h"
+#include "nf_wheel.h"
 #include "nf_debug.h"
 
 extern float g_lastFOV;
@@ -120,7 +121,7 @@ static const nf_ammopanel_t s_ammoPanels[32] =
 };
 
 static HSPRITE s_hIrisCircle, s_hIris[9], s_hIrisFlash;
-static HSPRITE s_hAmmoCircle, s_hCrosshair, s_hSniperScope;
+static HSPRITE s_hAmmoCircle, s_hCrosshair, s_hSniperScope, s_hNumbers;
 static int s_iScopeWeapon, s_iScopeFOV;
 static HSPRITE s_hClip[32], s_hBack[32], s_hFront[32];
 static HSPRITE s_hCylinder[32][6];
@@ -160,14 +161,31 @@ static const float s_white[3] = { 1.0f, 1.0f, 1.0f };
 static int s_iFlashStep;
 static float s_flFlashNext;
 
+// size factor of the own-size HUD images (not the full-screen overlays): nf_hud_scale, 0 = screen height / 768
+// (the retail 1024_ art is made for 1024x768), never below 1
+static cvar_t *s_pHudScale;
+
+static float NF_HudScale( void )
+{
+	float scale = s_pHudScale ? s_pHudScale->value : 0.0f;
+	if( scale <= 0.0f )
+		scale = ScreenHeight / 768.0f;
+	return scale < 1.0f ? 1.0f : scale;
+}
+
+float NF_HudScaleFactor( void )
+{
+	return NF_HudScale();
+}
+
 static int NF_SpriteW( HSPRITE h )
 {
-	return h ? SPR_Width( h, 0 ) : 0;
+	return h ? (int)( SPR_Width( h, 0 ) * NF_HudScale() + 0.5f ) : 0;
 }
 
 static int NF_SpriteH( HSPRITE h )
 {
-	return h ? SPR_Height( h, 0 ) : 0;
+	return h ? (int)( SPR_Height( h, 0 ) * NF_HudScale() + 0.5f ) : 0;
 }
 
 // textured quad, the image modulated by rgb (white = as it is)
@@ -199,6 +217,11 @@ void NF_DrawImage( HSPRITE hspr, int x, int y, int w, int h, float alpha )
 	NF_DrawQuad( hspr, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, s_white, alpha );
 }
 
+void NF_DrawImageColor( HSPRITE hspr, int x, int y, int w, int h, int colorIndex, float alpha )
+{
+	NF_DrawQuad( hspr, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, s_colors[colorIndex & 3], alpha );
+}
+
 void NF_DrawImagePart( HSPRITE hspr, int x, int y, int w, int h, float s0, float t0, float s1, float t1, float alpha )
 {
 	NF_DrawQuad( hspr, x, y, w, h, s0, t0, s1, t1, s_white, alpha );
@@ -210,15 +233,15 @@ static void NF_DrawCorner( HSPRITE h, int x, int bottom, const float *rgb )
 	NF_DrawQuad( h, x, bottom - NF_SpriteH( h ), NF_SpriteW( h ), NF_SpriteH( h ), 0.0f, 0.0f, 1.0f, 1.0f, rgb, 1.0f );
 }
 
-// draw rows 0 .. rows of an image, the image anchored at (x, y)
+// draw rows 0 .. rows (image pixels) of an image, the image anchored at (x, y)
 static void NF_DrawImageTop( HSPRITE h, int x, int y, int rows )
 {
-	int w = NF_SpriteW( h ), ht = NF_SpriteH( h );
+	int w = NF_SpriteW( h ), ht = h ? SPR_Height( h, 0 ) : 0;
 	if( ht <= 0 || rows <= 0 )
 		return;
 	if( rows > ht )
 		rows = ht;
-	NF_DrawQuad( h, x, y, w, rows, 0.0f, 0.0f, 1.0f, (float)rows / ht, s_white, 1.0f );
+	NF_DrawQuad( h, x, y, w, (int)( rows * NF_HudScale() + 0.5f ), 0.0f, 0.0f, 1.0f, (float)rows / ht, s_white, 1.0f );
 }
 
 // retail 0x4104b52e: up to four "r, g, b" lines, each clamped to 0..255
@@ -257,6 +280,7 @@ void NF_HudVidInit( void )
 	}
 	s_hIrisFlash = SPR_Load( "gui/hud/640_health_Iris_09.png" );
 	s_hAmmoCircle = SPR_Load( "gui/hud/640_ammo_circle.png" );
+	s_hNumbers = SPR_Load( "gui/hud/640_hud_numbers.png" );
 	s_hCrosshair = SPR_Load( "gui/hud/640_crosshair_01.png" );
 	s_hSniperScope = SPR_Load( "gui/hud/sniper_1024.png" );
 	s_iScopeWeapon = s_iScopeFOV = 0;
@@ -380,6 +404,7 @@ void NF_HudInit( void )
 	HOOK_MESSAGE( ShowStinger );
 	HOOK_MESSAGE( ScoreInfoS );
 	gEngfuncs.pfnRegisterVariable( "nf_scoreinfo", "", 0 );
+	s_pHudScale = gEngfuncs.pfnRegisterVariable( "nf_hud_scale", "0", FCVAR_ARCHIVE );
 }
 
 bool NF_HudActive( void )
@@ -477,6 +502,28 @@ static void NF_DrawAmmo( void )
 		}
 	}
 
+	// spare ammo: three digits of 640_hud_numbers (16 cells of 16 px, 1.5x, leading zeros blank, tinted with the first
+	// colour), right edge about 130 px left of the screen edge, bottom 24 px up. Position from a retail screenshot at
+	// 1024x768; the retail panel code (CAmmoCountPanel 0x4103b560) puts it with the wheel, but the screenshot shows it
+	// beside the ammo circle.
+	int reserve = gHUD.m_Ammo.GetCurrentWeaponAmmo();
+	if( s_hNumbers && reserve >= 0 )
+	{
+		float scale = NF_HudScale();
+		int dw = (int)( 25 * scale + 0.5f ), dh = (int)( 24 * scale + 0.5f );
+		// with the wheel up the count sits left of it (retail: 128 + 80 + 50 px from the edge, docs/retail/hud.md)
+		int right = ScreenWidth - (int)( ( NF_WheelVisible() ? 258 : 130 ) * scale + 0.5f ), top = ScreenHeight - (int)( 24 * scale + 0.5f ) - dh;
+		if( reserve > 999 ) reserve = 999;
+		int digits[3] = { reserve / 100, reserve / 10 % 10, reserve % 10 };
+		bool started = false;
+		for( int i = 0; i < 3; i++ )
+		{
+			if( digits[i] ) started = true;
+			if( !started && i < 2 ) continue;
+			int left = right - ( 3 - i ) * dw;
+			NF_DrawQuad( s_hNumbers, left, top, dw, dh, digits[i] / 16.0f, 0.0f, ( digits[i] + 1 ) / 16.0f, 1.0f, s_colors[0], 1.0f );
+		}
+	}
 }
 
 void NF_HudDraw( float flTime )
@@ -524,7 +571,7 @@ void NF_HudDraw( float flTime )
 	if( pTarget && s_hProgressBack && s_hProgressFront && s_flProgressMax > 0 )
 	{
 		int w = NF_SpriteW( s_hProgressBack ), h = NF_SpriteH( s_hProgressBack );
-		int x = ( ScreenWidth - w ) / 2, y = ScreenHeight - 64 - h;
+		int x = ( ScreenWidth - w ) / 2, y = ScreenHeight - (int)( 64 * NF_HudScale() ) - h;
 		NF_DrawImage( s_hProgressBack, x, y, w, h, 1.0f );
 
 		int fw = NF_SpriteW( s_hProgressFront ), fh = NF_SpriteH( s_hProgressFront );

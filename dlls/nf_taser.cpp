@@ -266,9 +266,10 @@ void CNightfireTaser::UpdateFire( void )
 		Stop( TRUE );
 		return;
 	}
+	// Firing at nothing keeps the shock effect running (user request; retail dry-fires): only a held target is checked.
 	CBaseEntity *target = m_hTarget;
-	if( !target || !NF_TaserHeld( target, this ) || !target->IsAlive() ||
-		( target->pev->origin - m_pPlayer->pev->origin ).Length() > NF_TASER_HOLD_RANGE || !m_pPlayer->FVisible( target ))
+	if( target && ( !NF_TaserHeld( target, this ) || !target->IsAlive() ||
+		( target->pev->origin - m_pPlayer->pev->origin ).Length() > NF_TASER_HOLD_RANGE || !m_pPlayer->FVisible( target )))
 	{
 		Stop( TRUE );
 		return;
@@ -300,12 +301,12 @@ void CNightfireTaser::UpdateFire( void )
 	m_flCharge = NF_TaserCharge( m_flCharge, gpGlobals->time - m_flChargeTime, true );
 	m_flChargeTime = gpGlobals->time;
 	SetBattery();
-	if( gpGlobals->time >= m_flNextDamageTime && m_flCharge > 0 )
+	if( target && gpGlobals->time >= m_flNextDamageTime && m_flCharge > 0 )
 	{
 		m_flNextDamageTime = gpGlobals->time + NF_TASER_DAMAGE_INTERVAL;
 		target->TakeDamage( pev, m_pPlayer->pev, NF_SkillValue( "sk_plr_taser" ), DMG_SHOCK );
 	}
-	if( m_flCharge <= 0 || !target->IsAlive() || !NF_TaserHeld( target, this ))
+	if( m_flCharge <= 0 || ( target && ( !target->IsAlive() || !NF_TaserHeld( target, this ))))
 		Stop( TRUE );
 }
 

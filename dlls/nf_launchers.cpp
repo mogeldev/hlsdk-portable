@@ -50,11 +50,15 @@ public:
 	int Save( CSave &save );
 	int Restore( CRestore &restore );
 	static TYPEDESCRIPTION m_SaveData[];
-	EHANDLE m_hTarget;
+	BOOL Guided( void ) { return FClassnameIs( pev, "smart_rocket" ); }
+	void GuideView( BOOL on );
+	EHANDLE m_hTarget, m_hViewOwner;
+	Vector m_vecLastView;
+	BOOL m_bViewSet;
 };
 LINK_ENTITY_TO_CLASS( dumb_rocket, CNFRocket )
 LINK_ENTITY_TO_CLASS( smart_rocket, CNFRocket )
-TYPEDESCRIPTION CNFRocket::m_SaveData[] = { DEFINE_FIELD( CNFRocket, m_hTarget, FIELD_EHANDLE ) };
+TYPEDESCRIPTION CNFRocket::m_SaveData[] = { DEFINE_FIELD( CNFRocket, m_hTarget, FIELD_EHANDLE ), DEFINE_FIELD( CNFRocket, m_hViewOwner, FIELD_EHANDLE ), DEFINE_FIELD( CNFRocket, m_vecLastView, FIELD_VECTOR ) };
 IMPLEMENT_SAVERESTORE( CNFRocket, CGrenade )
 
 void CNFRocket::Precache( void )
@@ -77,14 +81,36 @@ void CNFRocket::Spawn( void )
 	SetTouch( &CNFRocket::RocketTouch );
 	SetThink( &CNFRocket::FlyThink );
 	pev->nextthink = gpGlobals->time + 0.1f;
+	m_bViewSet = FALSE;
+	if( Guided() ) GuideView( TRUE );
 	EMIT_SOUND( edict(), CHAN_VOICE, "weapons/rocket1.wav", 1, 0.5f );
 	MESSAGE_BEGIN( MSG_BROADCAST, SVC_TEMPENTITY );
 		WRITE_BYTE( TE_BEAMFOLLOW ); WRITE_SHORT( entindex() ); WRITE_SHORT( g_sModelIndexSmoke );
 		WRITE_BYTE( 10 ); WRITE_BYTE( 3 ); WRITE_BYTE( 220 ); WRITE_BYTE( 220 ); WRITE_BYTE( 220 ); WRITE_BYTE( 180 );
 	MESSAGE_END();
 }
+// retail CSmartRocket::IgniteThink 0x420e6d00: the owner's view is switched to the rocket
+void CNFRocket::GuideView( BOOL on )
+{
+	// NF_Explode clears pev->owner, so the player is remembered separately
+	CBaseEntity *owner = on ? ( pev->owner ? CBaseEntity::Instance( pev->owner ) : NULL ) : (CBaseEntity *)m_hViewOwner;
+	if( !owner || !owner->IsPlayer() ) return;
+	if( on )
+	{
+		m_hViewOwner = owner;
+		SET_VIEW( owner->edict(), edict() );
+		m_vecLastView = owner->pev->v_angle;
+		m_bViewSet = TRUE;
+	}
+	else if( m_bViewSet )
+	{
+		SET_VIEW( owner->edict(), owner->edict() );
+		m_bViewSet = FALSE;
+	}
+}
 void CNFRocket::UpdateOnRemove( void )
 {
+	GuideView( FALSE );
 	STOP_SOUND( edict(), CHAN_VOICE, "weapons/rocket1.wav" );
 	CGrenade::UpdateOnRemove();
 }
@@ -92,25 +118,36 @@ void CNFRocket::RocketTouch( CBaseEntity *other )
 {
 	if( other->edict() == pev->owner ) return;
 	STOP_SOUND( edict(), CHAN_VOICE, "weapons/rocket1.wav" );
+	GuideView( FALSE );
 	TraceResult trace = UTIL_GetGlobalTrace();
 	NF_Explode( this, &trace, DMG_BLAST );
 }
 void CNFRocket::FlyThink( void )
 {
-	if( !IsInWorld() || gpGlobals->time >= pev->dmgtime ) { UTIL_Remove( this ); return; }
-	CBaseEntity *target = m_hTarget;
-	if( FClassnameIs( pev, "smart_rocket" ) && target && target->IsAlive() && target->pev->deadflag == DEAD_NO && target->pev->health > 0 )
+	// not IsInWorld(): its +-4096 box is smaller than some Nightfire maps; outside the map the contents are solid
+	if( UTIL_PointContents( pev->origin ) == CONTENTS_SOLID || gpGlobals->time >= pev->dmgtime ) { UTIL_Remove( this ); return; }
+	CBaseEntity *owner = pev->owner ? CBaseEntity::Instance( pev->owner ) : NULL;
+	if( Guided() && owner && owner->IsPlayer() && owner->IsAlive() )
 	{
-		TraceResult trace;
-		Vector goal = target->BodyTarget( pev->origin );
-		UTIL_TraceLine( pev->origin, goal, dont_ignore_monsters, edict(), &trace );
-		if( trace.flFraction == 1 || trace.pHit == target->edict() )
+		// retail CSmartRocket::FollowThink 0x420e6960: the owner steers. The turn rate is the owner's view change
+		// times 1.5 (the retail movement-key steering, 30 deg/s, is not ported: user wants mouse only); the speed stays 550.
+		Vector view = owner->pev->v_angle, delta = ( view - m_vecLastView ) * 1.5f;
+		m_vecLastView = view;
+		for( int i = 0; i < 2; i++ )
 		{
-			Vector direction = ( pev->velocity.Normalize() * 0.8f + ( goal - pev->origin ).Normalize() * 0.2f ).Normalize();
-			pev->velocity = direction * 550;
-			pev->angles = UTIL_VecToAngles( direction );
+			while( delta[i] > 180 ) delta[i] -= 360;
+			while( delta[i] < -180 ) delta[i] += 360;
 		}
+		if( fabs( delta.x ) > 100 ) delta.x = 0;
+		if( fabs( delta.y ) > 100 ) delta.y = 0;
+		// the retail factor is read as "1.5 times the view change per think": degrees per second = change * 1.5 / 0.1 [assumed]
+		pev->avelocity = Vector( delta.x * 10.0f, delta.y * 10.0f, 0 );
+		UTIL_MakeVectors( pev->angles );
+		pev->velocity = gpGlobals->v_forward * 550;
+		owner->pev->velocity.x = owner->pev->velocity.y = 0;
 	}
+	else if( Guided() )
+		GuideView( FALSE );
 	pev->nextthink = gpGlobals->time + 0.1f;
 }
 
@@ -203,27 +240,14 @@ void CNFLauncher::Fire( BOOL alternate )
 	Vector origin = m_pPlayer->GetGunPosition() + forward * 16;
 	if( Rocket() )
 	{
-		CBaseEntity *target = NULL;
-		// Acquire before spawning: the rocket's own bbox would block the sight trace.
-		if( alternate )
-		{
-			float bestDot = 0.9f;
-			CBaseEntity *candidate = NULL;
-			while(( candidate = UTIL_FindEntityInSphere( candidate, origin, 4096 )) != NULL )
-			{
-				if( candidate == m_pPlayer || !candidate->IsAlive() || candidate->pev->deadflag != DEAD_NO || candidate->pev->health <= 0 || candidate->pev->takedamage == DAMAGE_NO || !( candidate->pev->flags & ( FL_MONSTER | FL_CLIENT ))) continue;
-				if( candidate->Classify() == CLASS_PLAYER_ALLY ) continue;
-				Vector direction = ( candidate->BodyTarget( origin ) - origin ).Normalize();
-				float dot = DotProduct( direction, forward );
-				TraceResult trace;
-				UTIL_TraceLine( origin, candidate->BodyTarget( origin ), dont_ignore_monsters, m_pPlayer->edict(), &trace );
-				if( dot > bestDot && ( trace.flFraction == 1 || trace.pHit == candidate->edict() )) { bestDot = dot; target = candidate; }
-			}
-		}
-		CNFRocket *rocket = (CNFRocket *)CBaseEntity::Create( alternate ? "smart_rocket" : "dumb_rocket", origin, m_pPlayer->pev->v_angle, m_pPlayer->edict() );
+		// AT-420 Sentinel: primary = guided missile (the player steers it, see CNFRocket::FlyThink), secondary = unguided
+		// [mi6-hq.com/sections/nfgame/w_at420; the retail vtable has the guided launch in slot 104]
+		CBaseEntity *flying = NULL;
+		while(( flying = UTIL_FindEntityByClassname( flying, "smart_rocket" )) != NULL )
+			if( flying->pev->owner == m_pPlayer->edict() ) return;
+		CNFRocket *rocket = (CNFRocket *)CBaseEntity::Create( alternate ? "dumb_rocket" : "smart_rocket", origin, m_pPlayer->pev->v_angle, m_pPlayer->edict() );
 		if( !rocket ) return;
-		rocket->m_hTarget = target;
-		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: launcher %s target %d clip %d\n", alternate ? "smart_rocket" : "dumb_rocket", rocket->m_hTarget ? ((CBaseEntity *)rocket->m_hTarget)->entindex() : 0, m_iClip - 1 );
+		if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: launcher %s target 0 clip %d\n", alternate ? "dumb_rocket" : "smart_rocket", m_iClip - 1 );
 	}
 	else
 	{
@@ -233,7 +257,8 @@ void CNFLauncher::Fire( BOOL alternate )
 	}
 	--m_iClip;
 	SendWeaponAnim( 2 );
-	EMIT_SOUND( m_pPlayer->edict(), CHAN_WEAPON, Rocket() ? "weapons/rocket1.wav" : "weapons/grenade_launcher_fire.wav", 1, ATTN_NORM );
+	// the rocket plays its own flight sound and stops it on impact; a copy on the player's channel was never stopped
+	if( !Rocket() ) EMIT_SOUND( m_pPlayer->edict(), CHAN_WEAPON, "weapons/grenade_launcher_fire.wav", 1, ATTN_NORM );
 	m_pPlayer->m_iWeaponVolume = Rocket() ? 1280 : 768;
 	m_pPlayer->m_iWeaponFlash = BRIGHT_GUN_FLASH;
 	m_pPlayer->SetAnimation( PLAYER_ATTACK1 );

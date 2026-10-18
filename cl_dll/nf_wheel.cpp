@@ -26,7 +26,7 @@ struct nf_wheel_item_t
 	bool known;
 };
 static nf_wheel_item_t s_items[MAX_WEAPONS];
-static HSPRITE s_ring, s_large[MAX_WEAPONS], s_small[MAX_WEAPONS];
+static HSPRITE s_ring, s_ringBg, s_large[MAX_WEAPONS], s_small[MAX_WEAPONS];
 static bool s_iconAttempted[MAX_WEAPONS];
 static bool s_ready, s_locked, s_intermission;
 static int s_mode, s_last[4], s_active, s_pending;
@@ -257,6 +257,7 @@ void NF_WheelVidInit( void )
 	memset( s_large, 0, sizeof( s_large ) );
 	memset( s_small, 0, sizeof( s_small ) );
 	s_ring = SPR_Load( "gui/hud/640_hud_ring.png" );
+	s_ringBg = SPR_Load( "gui/hud/640_weapon_select_bg.png" );
 	memset( s_iconAttempted, 0, sizeof( s_iconAttempted ) );
 }
 
@@ -291,25 +292,31 @@ void NF_WheelDraw( float time, int intermission )
 	int id = s_last[s_mode];
 	if( !NF_WheelUsable( id, s_mode ) ) return;
 	NF_WheelLoadIcon( id );
-	float scale = ScreenWidth / 640.0f;
-	if( ScreenHeight / 480.0f < scale ) scale = ScreenHeight / 480.0f;
-	float x = ScreenWidth * 0.5f, y = ScreenHeight - 104.0f * scale;
-	// [assumed] centred ring and two neighbours; exact retail panel geometry unresolved.
-	NF_WheelImage( s_ring, x, y, scale, 0.85f );
-	NF_WheelImage( s_large[id], x, y, scale, s_pending ? 0.65f : 1.0f );
+	// Bottom right, the 256x128 arc images anchored in the screen corner with the icons along the arc. The offsets
+	// (from the bottom right corner at HUD scale 1) are measured from a retail screenshot: selected weapon
+	// (-121, -93), previous (-53, -129), next (-180, -47) [assumed: exact panel code not traced].
+	float scale = NF_HudScaleFactor();
+	float right = ScreenWidth, bottom = ScreenHeight;
+	// the grey images are tinted like the iris and ammo circles: fill with the first colour, outline with the third [assumed]
+	if( s_ringBg ) NF_DrawImageColor( s_ringBg, (int)( right - 256 * scale ), (int)( bottom - 128 * scale ), (int)( 256 * scale ), (int)( 128 * scale ), 0, 1.0f );
+	if( s_ring ) NF_DrawImageColor( s_ring, (int)( right - 256 * scale ), (int)( bottom - 128 * scale ), (int)( 256 * scale ), (int)( 128 * scale ), 2, 1.0f );
+	NF_WheelImage( s_large[id], right - 121 * scale, bottom - 93 * scale, scale, s_pending ? 0.65f : 1.0f );
 	int prev = NF_WheelFind( id, -1, s_mode ), next = NF_WheelFind( id, 1, s_mode );
-	int neighbours[2] = { prev, next };
-	for( int n = 0; n < 2; n++ )
+	if( prev && prev != id )
 	{
-		int other = neighbours[n];
-		if( !other || other == id || ( n == 1 && other == prev ) ) continue;
-		NF_WheelLoadIcon( other );
-		NF_WheelImage( s_small[other], x + ( n ? 96.0f : -96.0f ) * scale, y, scale, 0.65f );
+		NF_WheelLoadIcon( prev );
+		NF_WheelImage( s_small[prev], right - 53 * scale, bottom - 129 * scale, scale, 0.65f );
 	}
-	WEAPON *weapon = gWR.GetWeapon( id );
-	char text[160];
-	snprintf( text, sizeof( text ), "%s%s  %d / %d", s_pending ? "... " : "",
-		weapon->szName, weapon->iClip, weapon->iAmmoType >= 0 ? gWR.CountAmmo( weapon->iAmmoType ) : 0 );
-	int width = gHUD.DrawHudStringLen( text );
-	gHUD.DrawHudString( (int)x - width / 2, (int)( y + 64.0f * scale ), ScreenWidth, text, 100, 180, 255 );
+	if( next && next != id && next != prev )
+	{
+		NF_WheelLoadIcon( next );
+		NF_WheelImage( s_small[next], right - 180 * scale, bottom - 47 * scale, scale, 0.65f );
+	}
+}
+
+bool NF_WheelVisible( void )
+{
+	if( !NF_WheelEnabled() || s_intermission || NF_WheelBlocked() ) return false;
+	if( gEngfuncs.GetClientTime() >= s_until ) return false;
+	return NF_WheelUsable( s_last[s_mode], s_mode );
 }

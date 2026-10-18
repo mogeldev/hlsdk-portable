@@ -70,13 +70,7 @@ public:
 		if( tr.flFraction == 1 )
 		{
 			UTIL_TraceHull( src, end, dont_ignore_monsters, head_hull, m_pPlayer->edict(), &tr );
-			// retail 0x420D78B0: a hull-only hit pushes a walking player back 64 units
-			// (the four-corner retry for BSP entities, 0x420D7670, only picks the nearest wall hit and is not ported)
-			if( tr.flFraction < 1 && m_pPlayer->pev->movetype == MOVETYPE_WALK )
-			{
-				m_pPlayer->pev->velocity = m_pPlayer->pev->velocity - gpGlobals->v_forward * 64;
-				if( NF_DEBUG( NF_DBG_WEAPONS )) ALERT( at_console, "nf_debug: dukes hull pushback\n" );
-			}
+			// retail 0x420D78B0 also pushes a walking player back 64 units on a hull-only hit; not ported (user: unneeded)
 		}
 		CBaseEntity *hit = tr.flFraction < 1 ? CBaseEntity::Instance( tr.pHit ) : NULL;
 		float damage = 0;
